@@ -1,0 +1,77 @@
+@baseUrl = http://localhost:8080/api
+@employeeToken = {{employeeLogin.response.body.data.accessToken}}
+@enterpriseToken = {{enterpriseLogin.response.body.data.accessToken}}
+
+### Health check
+GET http://localhost:3000/api/health
+
+### --- Auth: Employee ---
+
+# @name employeeOtpSend
+POST {{baseUrl}}/auth/employee/otp/send
+Content-Type: application/json
+
+{
+  "phone": "+919888877766"
+}
+
+###
+
+# @name employeeLogin
+POST {{baseUrl}}/auth/employee/otp/verify
+Content-Type: application/json
+
+{
+  "phone": "+919888877766",
+  "code": "123456"
+}
+
+###
+
+### --- Auth: Enterprise ---
+
+# @name enterpriseLogin
+POST {{baseUrl}}/auth/enterprise/login
+Content-Type: application/json
+
+{
+  "email": "hr@technova.com",
+  "password": "VeriWork@123"
+}
+
+###
+
+# @name enterpriseRegister
+POST {{baseUrl}}/auth/enterprise/register
+Content-Type: application/json
+
+{
+  "email": "admin@newcompany.com",
+  "password": "SecurePass123",
+  "confirmPassword": "SecurePass123",
+  "companyLegalName": "New Company Pvt Ltd",
+  "industry": "Technology",
+  "companySize": "50-200",
+  "workEmail": "hr@newcompany.com",
+  "contactName": "Rajesh Kumar",
+  "phone": "9876543210",
+  "country": "India",
+  "city": "Mumbai"
+}
+
+###
+
+### --- Employee Profile ---
+
+GET {{baseUrl}}/employee/profile
+Authorization: Bearer {{employeeToken}}
+
+###
+
+GET {{baseUrl}}/employee/score
+Authorization: Bearer {{employeeToken}}
+
+###
+
+GET {{baseUrl}}/enterprise/dashboard
+Authorization: Bearer {{enterpriseToken}}

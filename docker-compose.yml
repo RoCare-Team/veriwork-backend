@@ -1,0 +1,11 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: veriwork-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - veriwork_mongo_data:/data/db
+
+volumes:
+  veriwork_mongo_data:
