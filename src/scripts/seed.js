@@ -9,6 +9,11 @@ import { JoinRequest } from '../models/JoinRequest.js';
 import { ActivityLog } from '../models/ActivityLog.js';
 import { VaultItem } from '../models/VaultItem.js';
 import { QrOnboarding } from '../models/QrOnboarding.js';
+import { AccessRequest } from '../models/AccessRequest.js';
+import { CompanyEmployee } from '../models/CompanyEmployee.js';
+import { CompanyEmployeeInvitation } from '../models/CompanyEmployeeInvitation.js';
+import { CompanyAuditLog } from '../models/CompanyAuditLog.js';
+import { VerificationRequest } from '../models/VerificationRequest.js';
 import { generatePublicSlug, generateVeriworkId } from '../utils/idGenerators.js';
 import { calculateEmployeeScore } from '../services/scoreService.js';
 
@@ -25,6 +30,11 @@ async function clearCollections() {
     ActivityLog.deleteMany({}),
     VaultItem.deleteMany({}),
     QrOnboarding.deleteMany({}),
+    AccessRequest.deleteMany({}),
+    CompanyEmployee.deleteMany({}),
+    CompanyEmployeeInvitation.deleteMany({}),
+    CompanyAuditLog.deleteMany({}),
+    VerificationRequest.deleteMany({}),
   ]);
 }
 
@@ -192,33 +202,7 @@ async function seed() {
   profile2.scoreCached = calculateEmployeeScore(profile2, [jobs2]);
   await profile2.save();
 
-  // Activity logs for employee 1
-  await ActivityLog.insertMany([
-    {
-      userId: user1._id,
-      type: 'consent_request',
-      title: 'Background check consent',
-      message: 'TechNova Solutions requested access to your employment records',
-      company: 'TechNova Solutions',
-      status: 'pending',
-    },
-    {
-      userId: user1._id,
-      type: 'access_request',
-      title: 'Profile access request',
-      message: 'HR at TechNova wants to view your VeriScore',
-      company: 'TechNova Solutions',
-      status: 'pending',
-    },
-  ]);
-
-  // Vault items
-  await VaultItem.insertMany([
-    { userId: user1._id, category: 'identity', name: 'Aadhaar Card', size: '245 KB', status: 'verified' },
-    { userId: user1._id, category: 'education', name: 'B.Tech Degree', size: '1.2 MB', status: 'verified' },
-  ]);
-
-  // Join requests (4 total)
+  // Join requests (workforce)
   await JoinRequest.insertMany([
     {
       companyId: company._id,
@@ -227,9 +211,10 @@ async function seed() {
       role: 'Senior Software Engineer',
       department: 'Engineering',
       employeeScore: profile1.scoreCached,
-      joiningDate: '2026-04-01',
+      joiningDate: '2024-03-01',
       salaryBand: '15-20 LPA',
-      status: 'pending',
+      employmentStatus: 'active',
+      status: 'approved',
     },
     {
       companyId: company._id,
@@ -238,9 +223,10 @@ async function seed() {
       role: 'Product Manager',
       department: 'Product',
       employeeScore: profile2.scoreCached,
-      joiningDate: '2026-05-01',
+      joiningDate: '2024-06-15',
       salaryBand: '18-22 LPA',
-      status: 'pending',
+      employmentStatus: 'active',
+      status: 'approved',
     },
     {
       companyId: company._id,
@@ -248,6 +234,8 @@ async function seed() {
       role: 'DevOps Engineer',
       department: 'Infrastructure',
       employeeScore: 620,
+      joiningDate: '2025-01-10',
+      employmentStatus: 'on_leave',
       status: 'approved',
     },
     {
@@ -256,11 +244,160 @@ async function seed() {
       role: 'UX Designer',
       department: 'Design',
       employeeScore: 580,
+      joiningDate: '2025-02-01',
+      employmentStatus: 'probation',
+      status: 'approved',
+    },
+    {
+      companyId: company._id,
+      name: 'Karan Joshi',
+      role: 'Sales Executive',
+      department: 'Sales',
+      employeeScore: 510,
+      joiningDate: '2025-04-01',
+      employmentStatus: 'active',
+      status: 'approved',
+    },
+    {
+      companyId: company._id,
+      name: 'Pending Candidate',
+      role: 'HR Associate',
+      department: 'HR',
+      employeeScore: 400,
+      status: 'pending',
+    },
+    {
+      companyId: company._id,
+      name: 'Rejected Candidate',
+      role: 'Marketing Lead',
+      department: 'Marketing',
+      employeeScore: 350,
       status: 'rejected',
     },
   ]);
 
-  // QR onboarding
+  const [bgActivity, profileActivity] = await ActivityLog.insertMany([
+    {
+      userId: user1._id,
+      type: 'consent_request',
+      title: 'Background check consent',
+      message: 'TechNova Solutions requested access to your employment records',
+      company: 'TechNova Solutions',
+      status: 'pending',
+      metadata: { companyId: company._id.toString(), requestType: 'background_check' },
+    },
+    {
+      userId: user1._id,
+      type: 'access_request',
+      title: 'Profile access request',
+      message: 'HR at TechNova wants to view your VeriScore',
+      company: 'TechNova Solutions',
+      status: 'approved',
+      metadata: { companyId: company._id.toString(), requestType: 'profile_access' },
+    },
+  ]);
+
+  const [bgRequest, acceptedRequest] = await AccessRequest.insertMany([
+    {
+      companyId: company._id,
+      requestedBy: enterpriseUser._id,
+      employeeId: user1._id,
+      employeeUserId: user1._id,
+      employeeName: 'Rahul Mehta',
+      requestType: 'background_check',
+      message: 'Required for onboarding compliance',
+      status: 'pending',
+      activityLogId: bgActivity._id,
+    },
+    {
+      companyId: company._id,
+      requestedBy: enterpriseUser._id,
+      employeeId: user1._id,
+      employeeUserId: user1._id,
+      employeeName: 'Rahul Mehta',
+      requestType: 'profile_access',
+      message: 'View VeriScore for role assignment',
+      status: 'accepted',
+      respondedAt: new Date('2025-12-01'),
+      activityLogId: profileActivity._id,
+    },
+    {
+      companyId: company._id,
+      requestedBy: enterpriseUser._id,
+      employeeId: user2._id,
+      employeeUserId: user2._id,
+      employeeName: 'Anita Desai',
+      requestType: 'verification_data',
+      message: 'Verification data needed for compliance audit',
+      status: 'rejected',
+      respondedAt: new Date('2025-11-15'),
+    },
+    {
+      companyId: company._id,
+      requestedBy: enterpriseUser._id,
+      employeeId: user2._id,
+      employeeUserId: user2._id,
+      employeeName: 'Anita Desai',
+      requestType: 'profile_access',
+      message: 'Product team profile review',
+      status: 'pending',
+    },
+  ]);
+
+  bgActivity.metadata.accessRequestId = bgRequest._id.toString();
+  profileActivity.metadata.accessRequestId = acceptedRequest._id.toString();
+  await Promise.all([bgActivity.save(), profileActivity.save()]);
+
+  // Company ↔ Employee linking (new phase)
+  await CompanyEmployee.insertMany([
+    {
+      companyId: company._id,
+      employeeId: user1._id,
+      department: 'Engineering',
+      designation: 'Senior Software Engineer',
+      employmentStatus: 'active',
+      joinedAt: new Date('2024-03-01'),
+    },
+    {
+      companyId: company._id,
+      employeeId: user2._id,
+      department: 'Product',
+      designation: 'Product Manager',
+      employmentStatus: 'active',
+      joinedAt: new Date('2024-06-15'),
+    },
+  ]);
+
+  await CompanyEmployeeInvitation.create({
+    companyId: company._id,
+    employeeId: user2._id,
+    employeeEmail: profile2.email,
+    department: 'Product',
+    designation: 'Product Manager',
+    status: 'accepted',
+    invitedBy: enterpriseUser._id,
+    invitedAt: new Date('2024-06-01'),
+    respondedAt: new Date('2024-06-15'),
+  });
+
+  await VerificationRequest.create({
+    requestingCompanyId: company._id,
+    targetCompanyId: null,
+    employeeId: user1._id,
+    jobExperienceId: jobs1[0]._id,
+    previousCompanyName: 'Infosys',
+    verificationChannel: 'email',
+    hrEmail: 'hr@infosys.com',
+    status: 'in_process',
+    requestedBy: enterpriseUser._id,
+    requestedAt: new Date(),
+  });
+
+  await VaultItem.insertMany([
+    { userId: user1._id, category: 'identity', name: 'Aadhaar Card', size: '245 KB', status: 'verified' },
+    { userId: user1._id, category: 'education', name: 'B.Tech Degree', size: '1.2 MB', status: 'verified' },
+  ]);
+
   await QrOnboarding.create({
     companyId: company._id,
     label: 'Campus Hiring 2026',

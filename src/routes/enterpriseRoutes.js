@@ -3,13 +3,17 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { validate } from '../middleware/validate.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { requireCompanyApproved } from '../middleware/requireCompanyApproved.js';
-import { upload } from '../middleware/upload.js';import {
+import { upload } from '../middleware/upload.js';
+import {
   basicInfoSchema,
   registrationSchema,
   submitOnboardingSchema,
   updateJoinRequestSchema,
   createJoinRequestSchema,
   createQrSchema,
+  teamEmployeesQuerySchema,
+  accessRequestsQuerySchema,
+  createAccessRequestSchema,
 } from '../validators/enterpriseValidators.js';
 import * as enterpriseController from '../controllers/enterpriseController.js';
 
@@ -29,7 +33,30 @@ router.post('/onboarding/submit', validate(submitOnboardingSchema), asyncHandler
 
 router.use(requireCompanyApproved);
 
-router.get('/dashboard', asyncHandler(enterpriseController.getDashboard));router.get('/workforce', asyncHandler(enterpriseController.getWorkforce));
+router.get('/dashboard', asyncHandler(enterpriseController.getDashboard));
+router.get('/workforce', asyncHandler(enterpriseController.getWorkforce));
+
+router.get('/team/departments', asyncHandler(enterpriseController.getDepartments));
+router.get(
+  '/team/employees',
+  validate(teamEmployeesQuerySchema, 'query'),
+  asyncHandler(enterpriseController.listTeamEmployees),
+);
+router.get('/team/employees/:id', asyncHandler(enterpriseController.getTeamEmployee));
+
+router.get(
+  '/access-requests',
+  validate(accessRequestsQuerySchema, 'query'),
+  asyncHandler(enterpriseController.listAccessRequests),
+);
+router.post(
+  '/access-requests',
+  validate(createAccessRequestSchema),
+  asyncHandler(enterpriseController.createAccessRequest),
+);
+router.get('/access-requests/:id', asyncHandler(enterpriseController.getAccessRequest));
+
+router.get('/insights', asyncHandler(enterpriseController.getInsights));
 
 router.get('/join-requests', asyncHandler(enterpriseController.listJoinRequests));
 router.post('/join-requests', validate(createJoinRequestSchema), asyncHandler(enterpriseController.createJoinRequest));

@@ -6,6 +6,15 @@ export function notFoundHandler(_req, _res, next) {
 }
 
 export function errorHandler(err, _req, res, _next) {
+  if (err.name === 'MulterError') {
+    return res.status(400).json({
+      success: false,
+      message: err.code === 'LIMIT_FILE_SIZE'
+        ? 'File too large. Max 5MB for photos, 10MB for documents.'
+        : err.message,
+    });
+  }
+
   const statusCode = err.statusCode || 500;
   const response = {
     success: false,

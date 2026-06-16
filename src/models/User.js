@@ -15,6 +15,17 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
+    googleId: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
+    },
+    authProvider: {
+      type: String,
+      enum: ['phone', 'google'],
+      default: 'phone',
+    },
     passwordHash: {
       type: String,
     },

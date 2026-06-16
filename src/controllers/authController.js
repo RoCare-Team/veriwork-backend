@@ -10,6 +10,11 @@ export async function verifyEmployeeOtp(req, res) {
   res.json({ success: true, data: result });
 }
 
+export async function employeeGoogleLogin(req, res) {
+  const result = await authService.employeeGoogleLogin(req.body.idToken);
+  res.json({ success: true, data: result });
+}
+
 export async function enterpriseLogin(req, res) {
   const result = await authService.enterpriseLogin(req.body.email, req.body.password);
   res.json({ success: true, data: result });

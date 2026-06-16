@@ -5,6 +5,7 @@ import {
   getVerificationPercent,
   isVerificationComplete,
 } from './scoreService.js';
+import { refreshCachedScore } from './employeeProfileService.js';
 
 export async function getVerificationStatus(userId) {
   const profile = await EmployeeProfile.findOne({ userId });
@@ -18,6 +19,29 @@ export async function getVerificationStatus(userId) {
     verificationPercent: getVerificationPercent(profile),
     isComplete: isVerificationComplete(profile),
     currentStep: getCurrentVerificationStep(profile),
+    steps: [
+      {
+        id: 'profile',
+        label: 'Profile',
+        title: 'Create your profile',
+        description: 'Name, role, contact details',
+        complete: profile.profileSetupComplete,
+      },
+      {
+        id: 'aadhaar',
+        label: 'Aadhaar',
+        title: 'Link Aadhaar',
+        description: 'Secure e-KYC via DigiLocker or Aadhaar OTP',
+        complete: profile.aadhaarVerified,
+      },
+      {
+        id: 'biometric',
+        label: 'Biometric',
+        title: 'Biometric check',
+        description: 'Live face match with ID photo via selfie',
+        complete: profile.biometricVerified,
+      },
+    ],
   };
 }
 
@@ -37,6 +61,7 @@ export async function verifyAadhaar(userId, { method }) {
     profile.digilockerUsed = true;
   }
   await profile.save();
+  await refreshCachedScore(userId);
 
   return {
     message: method === 'digilocker'
@@ -61,6 +86,7 @@ export async function verifyBiometric(userId, photoUrl) {
   profile.biometricVerified = true;
   if (photoUrl) profile.photoUrl = photoUrl;
   await profile.save();
+  await refreshCachedScore(userId);
 
   return {
     message: 'Biometric liveness check passed (mock)',

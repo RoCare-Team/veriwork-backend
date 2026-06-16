@@ -3,14 +3,50 @@ import { Document } from '../models/Document.js';
 import { ApiError } from '../utils/ApiError.js';
 import { storeUploadedFile } from '../utils/fileUpload.js';
 import { refreshCachedScore } from './employeeProfileService.js';
+
+function formatJob(job) {
+  return {
+    id: job._id,
+    title: job.title,
+    company: job.company,
+    employmentType: job.employmentType || 'Full-time',
+    salaryBand: job.salaryBand,
+    joiningDate: job.joiningDate,
+    exitDate: job.exitDate,
+    isPresent: job.isPresent,
+    duration: job.duration,
+    companyEmail: job.companyEmail,
+    hrEmail: job.hrEmail,
+    description: job.description,
+    status: job.status,
+    statusLabel: job.status === 'verified'
+      ? 'Verified'
+      : job.status === 'in_process'
+        ? 'In Process'
+        : 'Not Verified',
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  };
+}
+
 export async function listJobs(userId) {
-  return JobExperience.find({ userId }).sort({ createdAt: -1 });
+  const jobs = await JobExperience.find({ userId }).sort({ createdAt: -1 });
+  const verifiedCount = jobs.filter((job) => job.status === 'verified').length;
+
+  return {
+    summary: {
+      totalRoles: jobs.length,
+      verifiedCount,
+      verifiedLabel: `${verifiedCount}/${jobs.length}`,
+    },
+    jobs: jobs.map(formatJob),
+  };
 }
 
 export async function createJob(userId, data) {
   const job = await JobExperience.create({ userId, ...data });
   await refreshCachedScore(userId);
-  return job;
+  return formatJob(job);
 }
 
 export async function getJobById(userId, jobId) {

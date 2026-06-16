@@ -3,6 +3,7 @@ import * as verificationService from '../services/verificationService.js';
 import * as jobService from '../services/jobService.js';
 import * as activityService from '../services/activityService.js';
 import * as vaultService from '../services/vaultService.js';
+import * as employeeLinkingService from '../services/employeeLinkingService.js';
 import { storeUploadedFile } from '../utils/fileUpload.js';
 export async function getProfile(req, res) {
   const profile = await profileService.getEmployeeProfile(req.user._id);
@@ -10,7 +11,20 @@ export async function getProfile(req, res) {
 }
 
 export async function updateProfile(req, res) {
-  const profile = await profileService.updateEmployeeProfile(req.user._id, req.body);
+  const profile = await profileService.updateEmployeeProfile(
+    req.user._id,
+    req.body,
+    req.file ?? null,
+  );
+  res.json({ success: true, data: profile });
+}
+
+export async function setupProfile(req, res) {
+  const profile = await profileService.setupEmployeeProfile(
+    req.user._id,
+    req.body,
+    req.file ?? null,
+  );
   res.json({ success: true, data: profile });
 }
 
@@ -51,7 +65,7 @@ export async function uploadJobDocument(req, res) {
 }
 
 export async function listActivity(req, res) {
-  const activity = await activityService.listActivity(req.user._id);
+  const activity = await activityService.listActivity(req.user._id, req.query);
   res.json({ success: true, data: activity });
 }
 
@@ -77,4 +91,48 @@ export async function createVaultItem(req, res) {
 export async function getSettings(req, res) {
   const settings = await profileService.getEmployeeSettings(req.user._id);
   res.json({ success: true, data: settings });
+}
+
+export async function updateSettings(req, res) {
+  const settings = await profileService.updateEmployeeSettings(req.user._id, req.body);
+  res.json({ success: true, data: settings });
+}
+
+export async function getProfessionalId(req, res) {
+  const data = await profileService.getProfessionalId(req.user._id);
+  res.json({ success: true, data });
+}
+
+export async function listInvitations(req, res) {
+  const data = await employeeLinkingService.listEmployeeInvitations(req.user._id);
+  res.json({ success: true, data });
+}
+
+export async function acceptInvitation(req, res) {
+  const invitationId = req.params.id || req.params.invitationId;
+  const data = await employeeLinkingService.acceptInvitation(req.user._id, invitationId);
+  res.json({ success: true, data });
+}
+
+export async function rejectInvitation(req, res) {
+  const invitationId = req.params.id || req.params.invitationId;
+  const data = await employeeLinkingService.rejectInvitation(req.user._id, invitationId);
+  res.json({ success: true, data });
+}
+
+export async function listAccessRequests(req, res) {
+  const data = await employeeLinkingService.listEmployeeAccessRequests(req.user._id);
+  res.json({ success: true, data });
+}
+
+export async function approveAccessRequest(req, res) {
+  const requestId = req.params.id || req.params.requestId;
+  const data = await employeeLinkingService.approveEmployeeAccessRequest(req.user._id, requestId);
+  res.json({ success: true, data });
+}
+
+export async function rejectAccessRequest(req, res) {
+  const requestId = req.params.id || req.params.requestId;
+  const data = await employeeLinkingService.rejectEmployeeAccessRequest(req.user._id, requestId);
+  res.json({ success: true, data });
 }

@@ -8,6 +8,7 @@ import {
   buildAuthEmployeePayload,
   getJobsForUser,
   getOrCreateEmployeeUser,
+  getOrCreateEmployeeByGoogle,
 } from './employeeProfileService.js';
 import { RefreshToken } from '../models/RefreshToken.js';
 import {
@@ -19,18 +20,12 @@ import {
 } from './tokenService.js';
 import { normalizePhone } from '../utils/idGenerators.js';
 import { getEnterpriseHomeRoute, getCompanyApprovalStatus } from '../utils/companyApproval.js';
+import { verifyGoogleIdToken } from './googleAuthService.js';
 
 const SALT_ROUNDS = 10;
 
-export async function employeeSendOtp(phone) {
-  return sendOtp(phone);
-}
-
-export async function employeeVerifyOtp(phone, code) {
-  const normalized = await verifyOtp(phone, code);
-  const { user, profile } = await getOrCreateEmployeeUser(normalized);
+async function buildEmployeeAuthResponse(user, profile) {
   const jobs = await getJobsForUser(user._id);
-
   const accessToken = signAccessToken(user);
   const refreshToken = await createRefreshToken(user._id);
 
@@ -40,6 +35,27 @@ export async function employeeVerifyOtp(phone, code) {
     tokenType: 'Bearer',
     ...buildAuthEmployeePayload(user, profile, jobs),
   };
+}
+
+export async function employeeSendOtp(phone) {
+  return sendOtp(phone);
+}
+
+export async function employeeVerifyOtp(phone, code) {
+  const normalized = await verifyOtp(phone, code);
+  const { user, profile } = await getOrCreateEmployeeUser(normalized);
+  return buildEmployeeAuthResponse(user, profile);
+}
+
+export async function employeeGoogleLogin(idToken) {
+  const googleUser = await verifyGoogleIdToken(idToken);
+
+  if (!googleUser.emailVerified) {
+    throw ApiError.unauthorized('Google email is not verified');
+  }
+
+  const { user, profile } = await getOrCreateEmployeeByGoogle(googleUser);
+  return buildEmployeeAuthResponse(user, profile);
 }
 
 export async function enterpriseLogin(email, password) {

@@ -16,6 +16,10 @@ export const otpVerifySchema = z.object({
   code: z.string().length(6, 'OTP must be 6 digits'),
 });
 
+export const employeeGoogleSchema = z.object({
+  idToken: z.string().min(1, 'Google ID token is required'),
+});
+
 export const enterpriseLoginSchema = z.object({
   email: z.string({ required_error: 'Email is required' }).email('Invalid email address'),
   password: z.string({ required_error: 'Password is required' }).min(1, 'Password is required'),

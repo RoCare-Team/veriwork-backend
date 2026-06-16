@@ -4,6 +4,7 @@ import { validate } from '../middleware/validate.js';
 import {
   phoneSchema,
   otpVerifySchema,
+  employeeGoogleSchema,
   enterpriseLoginSchema,
   platformAdminLoginSchema,
   enterpriseRegisterSchema,
@@ -31,6 +32,7 @@ router.post('/employee/otp/send', validate(phoneSchema), asyncHandler(authContro
  *     summary: Verify OTP and login/register employee
  */
 router.post('/employee/otp/verify', validate(otpVerifySchema), asyncHandler(authController.verifyEmployeeOtp));
+router.post('/employee/google', validate(employeeGoogleSchema), asyncHandler(authController.employeeGoogleLogin));
 
 router.post('/enterprise/login', validate(enterpriseLoginSchema), asyncHandler(authController.enterpriseLogin));
 router.post('/admin/login', validate(platformAdminLoginSchema), asyncHandler(authController.platformAdminLogin));

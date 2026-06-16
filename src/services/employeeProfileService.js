@@ -11,6 +11,7 @@ import {
   isVerificationComplete,
 } from './scoreService.js';
 import { ApiError } from '../utils/ApiError.js';
+import { storeUploadedFile } from '../utils/fileUpload.js';
 
 export async function getOrCreateEmployeeUser(phone) {
   const normalized = normalizePhone(phone);
@@ -28,6 +29,48 @@ export async function getOrCreateEmployeeUser(phone) {
       veriworkId: generateVeriworkId(),
       publicSlug: generatePublicSlug(user._id),
     });
+  }
+
+  return { user, profile };
+}
+
+export async function getOrCreateEmployeeByGoogle({ googleId, email, name, picture }) {
+  let user = await User.findOne({ googleId, role: 'employee' });
+
+  if (!user && email) {
+    user = await User.findOne({ email, role: 'employee' });
+    if (user) {
+      user.googleId = googleId;
+      user.authProvider = 'google';
+      await user.save();
+    }
+  }
+
+  if (!user) {
+    user = await User.create({
+      googleId,
+      email,
+      role: 'employee',
+      authProvider: 'google',
+    });
+  }
+
+  let profile = await EmployeeProfile.findOne({ userId: user._id });
+  if (!profile) {
+    profile = await EmployeeProfile.create({
+      userId: user._id,
+      phone: user.phone || `google_${googleId}`,
+      email: email || '',
+      name: name || '',
+      photoUrl: picture,
+      veriworkId: generateVeriworkId(),
+      publicSlug: generatePublicSlug(user._id),
+    });
+  } else {
+    if (name && !profile.name) profile.name = name;
+    if (email && !profile.email) profile.email = email;
+    if (picture && !profile.photoUrl) profile.photoUrl = picture;
+    await profile.save();
   }
 
   return { user, profile };
@@ -51,16 +94,23 @@ export function buildProfileResponse(profile, jobs = []) {
   const score = calculateEmployeeScore(profile, jobs);
   const verificationPercent = getVerificationPercent(profile);
   const verified = isVerificationComplete(profile);
+  const verifiedJobsCount = jobs.filter((job) => job.status === 'verified').length;
 
   return {
     id: profile._id,
     userId: profile.userId,
-    phone: profile.phone,
     name: profile.name || 'New User',
-    initials: getInitials(profile.name),
+    phone: profile.phone || '',
+    email: profile.email || '',
+    dateOfBirth: profile.dateOfBirth || '',
+    gender: profile.gender || '',
     role: profile.role || 'Professional',
     company: profile.company || 'Not set',
-    email: profile.email || '',
+    totalExperience: profile.totalExperience || '',
+    currentCity: profile.currentCity || '',
+    currentAddress: profile.currentAddress || '',
+    permanentAddress: profile.permanentAddress || '',
+    initials: getInitials(profile.name),
     skills: profile.skills?.length ? profile.skills : profile.role ? [profile.role] : [],
     profileSetupComplete: profile.profileSetupComplete,
     aadhaarVerified: profile.aadhaarVerified,
@@ -71,6 +121,8 @@ export function buildProfileResponse(profile, jobs = []) {
     publicSlug: profile.publicSlug,
     publicProfileUrl: `veriwork.app/u/${profile.publicSlug}`,
     endorsements: profile.endorsements || 0,
+    verifiedJobsCount,
+    totalJobsCount: jobs.length,
     verificationPercent,
     employeeScore: score,
     scoreRating: getScoreRating(score),
@@ -79,6 +131,78 @@ export function buildProfileResponse(profile, jobs = []) {
     createdAt: profile.createdAt,
     updatedAt: profile.updatedAt,
   };
+}
+
+function isProfileFieldsComplete(profile) {
+  return Boolean(
+    profile.name?.trim()
+    && profile.phone?.trim()
+    && profile.email?.trim()
+    && profile.dateOfBirth?.trim()
+    && profile.gender?.trim()
+    && profile.role?.trim()
+    && profile.company?.trim()
+    && profile.totalExperience?.trim()
+    && profile.currentCity?.trim()
+    && profile.currentAddress?.trim()
+    && profile.permanentAddress?.trim(),
+  );
+}
+
+export async function updateEmployeeProfile(userId, data, photoFile = null) {
+  const profile = await EmployeeProfile.findOne({ userId });
+  if (!profile) throw ApiError.notFound('Profile not found');
+
+  const user = await User.findById(userId);
+
+  if (data.name !== undefined) profile.name = data.name.trim();
+  if (data.email !== undefined) profile.email = data.email.trim().toLowerCase();
+  if (data.dateOfBirth !== undefined) profile.dateOfBirth = data.dateOfBirth;
+  if (data.gender !== undefined) profile.gender = data.gender;
+  if (data.role !== undefined) profile.role = data.role.trim();
+  if (data.company !== undefined) profile.company = data.company.trim();
+  if (data.totalExperience !== undefined) profile.totalExperience = data.totalExperience.trim();
+  if (data.currentCity !== undefined) profile.currentCity = data.currentCity.trim();
+  if (data.currentAddress !== undefined) profile.currentAddress = data.currentAddress.trim();
+  if (data.permanentAddress !== undefined) profile.permanentAddress = data.permanentAddress.trim();
+  if (data.skills !== undefined) profile.skills = data.skills;
+
+  if (data.phone !== undefined) {
+    const normalized = normalizePhone(data.phone);
+    const phoneTaken = await User.findOne({
+      phone: normalized,
+      role: 'employee',
+      _id: { $ne: userId },
+    });
+    if (phoneTaken) throw ApiError.conflict('This mobile number is already registered');
+
+    profile.phone = normalized;
+    if (user) {
+      user.phone = normalized;
+      await user.save();
+    }
+  }
+
+  if (photoFile) {
+    const stored = await storeUploadedFile(photoFile, 'profile/photos');
+    profile.photoUrl = stored.url;
+  }
+
+  profile.profileSetupComplete = isProfileFieldsComplete(profile);
+
+  await profile.save();
+  await refreshCachedScore(userId);
+  const jobs = await getJobsForUser(userId);
+  const profileData = buildProfileResponse(profile, jobs);
+
+  return {
+    ...profileData,
+    nextRoute: profile.profileSetupComplete ? '/employee/verification' : '/employee/profile-setup',
+  };
+}
+
+export async function setupEmployeeProfile(userId, data, photoFile = null) {
+  return updateEmployeeProfile(userId, data, photoFile);
 }
 
 export function buildAuthEmployeePayload(user, profile, jobs = []) {
@@ -111,32 +235,67 @@ export async function getEmployeeSettings(userId) {
     phone: profile.phone,
     email: profile.email,
     name: profile.name,
-    notificationsEnabled: true,
-    publicProfileEnabled: true,
+    dateOfBirth: profile.dateOfBirth,
+    gender: profile.gender,
+    role: profile.role,
+    company: profile.company,
+    totalExperience: profile.totalExperience,
+    currentCity: profile.currentCity,
+    currentAddress: profile.currentAddress,
+    permanentAddress: profile.permanentAddress,
+    photoUrl: profile.photoUrl,
+    notificationsEnabled: profile.notificationsEnabled ?? true,
+    publicProfileEnabled: profile.publicProfileEnabled ?? true,
     publicSlug: profile.publicSlug,
     veriworkId: profile.veriworkId,
-    role: user.role,
+    userRole: user.role,
+    language: profile.language || 'en-US',
   };
 }
 
-export async function updateEmployeeProfile(userId, data) {
+export async function updateEmployeeSettings(userId, data) {
   const profile = await EmployeeProfile.findOne({ userId });
   if (!profile) throw ApiError.notFound('Profile not found');
 
-  if (data.name !== undefined) profile.name = data.name;
-  if (data.role !== undefined) profile.role = data.role;
-  if (data.company !== undefined) profile.company = data.company;
-  if (data.email !== undefined) profile.email = data.email;
-  if (data.skills !== undefined) profile.skills = data.skills;
-
-  if (data.name && data.role) {
-    profile.profileSetupComplete = true;
+  if (data.notificationsEnabled !== undefined) {
+    profile.notificationsEnabled = data.notificationsEnabled;
+  }
+  if (data.publicProfileEnabled !== undefined) {
+    profile.publicProfileEnabled = data.publicProfileEnabled;
+  }
+  if (data.language !== undefined) {
+    profile.language = data.language;
   }
 
   await profile.save();
-  await refreshCachedScore(userId);
+
+  return getEmployeeSettings(userId);
+}
+
+export async function getProfessionalId(userId) {
+  const profile = await EmployeeProfile.findOne({ userId });
+  if (!profile) throw ApiError.notFound('Profile not found');
+
   const jobs = await getJobsForUser(userId);
-  return buildProfileResponse(profile, jobs);
+  const profileData = buildProfileResponse(profile, jobs);
+
+  return {
+    name: profileData.name,
+    role: profileData.role,
+    photoUrl: profileData.photoUrl,
+    initials: profileData.initials,
+    veriworkId: profileData.veriworkId,
+    publicSlug: profileData.publicSlug,
+    publicProfileUrl: profileData.publicProfileUrl,
+    employeeScore: profileData.employeeScore,
+    trustScore: profileData.trustScore,
+    scoreRating: profileData.scoreRating,
+    endorsements: profileData.endorsements,
+    skills: profileData.skills,
+    verifiedJobsCount: profileData.verifiedJobsCount,
+    totalJobsCount: profileData.totalJobsCount,
+    isVerified: profileData.isVerified,
+  };
 }
 
 export async function getEmployeeProfile(userId) {

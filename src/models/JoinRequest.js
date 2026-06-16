@@ -20,6 +20,11 @@ const joinRequestSchema = new mongoose.Schema(
     salaryBand: { type: String, default: '' },
     documents: [{ type: String }],
     avatar: { type: String, default: '' },
+    employmentStatus: {
+      type: String,
+      enum: ['active', 'on_leave', 'terminated', 'probation'],
+      default: 'active',
+    },
     status: {
       type: String,
       enum: ['pending', 'approved', 'rejected'],

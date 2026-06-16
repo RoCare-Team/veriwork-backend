@@ -61,10 +61,18 @@ Content-Type: application/json
 
 ###
 
-### --- Employee Profile ---
+### --- Employee Profile Setup ---
 
 GET {{baseUrl}}/employee/profile
 Authorization: Bearer {{employeeToken}}
+
+###
+
+# Profile setup (multipart — use Postman form-data in UI)
+# POST {{baseUrl}}/employee/profile/setup
+# Fields: name, phone, email, dateOfBirth, gender, role, company,
+#         totalExperience, currentCity, currentAddress, permanentAddress,
+#         sameAsCurrentAddress (true/false), photo (file optional)
 
 ###
 
@@ -73,5 +81,233 @@ Authorization: Bearer {{employeeToken}}
 
 ###
 
+GET {{baseUrl}}/employee/professional-id
+Authorization: Bearer {{employeeToken}}
+
+###
+
+GET {{baseUrl}}/employee/verification/status
+Authorization: Bearer {{employeeToken}}
+
+###
+
+POST {{baseUrl}}/employee/verification/aadhaar
+Authorization: Bearer {{employeeToken}}
+Content-Type: application/json
+
+{
+  "method": "digilocker"
+}
+
+###
+
+GET {{baseUrl}}/employee/jobs
+Authorization: Bearer {{employeeToken}}
+
+###
+
+GET {{baseUrl}}/employee/vault
+Authorization: Bearer {{employeeToken}}
+
+###
+
+GET {{baseUrl}}/employee/activity
+Authorization: Bearer {{employeeToken}}
+
+###
+
+GET {{baseUrl}}/employee/activity?filter=requests
+Authorization: Bearer {{employeeToken}}
+
+###
+
+GET {{baseUrl}}/employee/invitations
+Authorization: Bearer {{employeeToken}}
+
+###
+
+POST {{baseUrl}}/employee/invitations/{{invitationId}}/accept
+Authorization: Bearer {{employeeToken}}
+
+###
+
+POST {{baseUrl}}/employee/invitations/{{invitationId}}/reject
+Authorization: Bearer {{employeeToken}}
+
+###
+
+GET {{baseUrl}}/employee/access-requests
+Authorization: Bearer {{employeeToken}}
+
+###
+
+POST {{baseUrl}}/employee/access-request/{{accessRequestId}}/approve
+Authorization: Bearer {{employeeToken}}
+
+###
+
+POST {{baseUrl}}/employee/access-request/{{accessRequestId}}/reject
+Authorization: Bearer {{employeeToken}}
+
+###
+
+GET {{baseUrl}}/employee/settings
+Authorization: Bearer {{employeeToken}}
+
+###
+
 GET {{baseUrl}}/enterprise/dashboard
 Authorization: Bearer {{enterpriseToken}}
+
+###
+
+### --- Enterprise: Team Management ---
+
+GET {{baseUrl}}/enterprise/team/departments
+Authorization: Bearer {{enterpriseToken}}
+
+###
+
+GET {{baseUrl}}/enterprise/team/employees
+Authorization: Bearer {{enterpriseToken}}
+
+###
+
+GET {{baseUrl}}/enterprise/team/employees?department=Engineering&employmentStatus=active&search=rahul
+Authorization: Bearer {{enterpriseToken}}
+
+###
+
+GET {{baseUrl}}/enterprise/team/employees/{{employeeId}}
+Authorization: Bearer {{enterpriseToken}}
+
+###
+
+### --- Enterprise: Access Requests ---
+
+GET {{baseUrl}}/enterprise/access-requests
+Authorization: Bearer {{enterpriseToken}}
+
+###
+
+GET {{baseUrl}}/enterprise/access-requests?status=pending
+Authorization: Bearer {{enterpriseToken}}
+
+###
+
+POST {{baseUrl}}/enterprise/access-requests
+Authorization: Bearer {{enterpriseToken}}
+Content-Type: application/json
+
+{
+  "employeeUserId": "EMPLOYEE_USER_ID_HERE",
+  "requestType": "profile_access",
+  "message": "We need your profile for compliance review."
+}
+
+###
+
+### --- Enterprise: Company Insights ---
+
+GET {{baseUrl}}/enterprise/insights
+Authorization: Bearer {{enterpriseToken}}
+
+###
+
+### --- Company: Employee Linking ---
+
+POST {{baseUrl}}/company/invite-employee
+Authorization: Bearer {{enterpriseToken}}
+Content-Type: application/json
+
+{
+  "employeeEmail": "rahul.mehta@email.com",
+  "department": "Engineering",
+  "designation": "Senior Software Engineer"
+}
+
+###
+
+GET {{baseUrl}}/company/team
+Authorization: Bearer {{enterpriseToken}}
+
+###
+
+GET {{baseUrl}}/company/team/Engineering
+Authorization: Bearer {{enterpriseToken}}
+
+###
+
+GET {{baseUrl}}/company/employees/{{employeeId}}/profile
+Authorization: Bearer {{enterpriseToken}}
+
+###
+
+POST {{baseUrl}}/company/access-request
+Authorization: Bearer {{enterpriseToken}}
+Content-Type: application/json
+
+{
+  "employeeId": "EMPLOYEE_USER_ID_HERE",
+  "requestType": "profile_access"
+}
+
+###
+
+GET {{baseUrl}}/company/access-requests
+Authorization: Bearer {{enterpriseToken}}
+
+###
+
+POST {{baseUrl}}/company/verification-request
+Authorization: Bearer {{enterpriseToken}}
+Content-Type: application/json
+
+{
+  "employeeId": "EMPLOYEE_USER_ID_HERE",
+  "jobExperienceId": "JOB_EXPERIENCE_ID_HERE",
+  "hrEmail": "hr@previouscompany.com"
+}
+
+###
+
+GET {{baseUrl}}/company/verification-requests/outgoing
+Authorization: Bearer {{enterpriseToken}}
+
+###
+
+GET {{baseUrl}}/company/verification-requests/incoming
+Authorization: Bearer {{enterpriseToken}}
+
+###
+
+POST {{baseUrl}}/company/verification-requests/{{verificationRequestId}}/approve
+Authorization: Bearer {{enterpriseToken}}
+
+###
+
+POST {{baseUrl}}/company/verification-requests/{{verificationRequestId}}/reject
+Authorization: Bearer {{enterpriseToken}}
+
+###
+
+POST {{baseUrl}}/company/verification-requests/{{verificationRequestId}}/complete-email
+Authorization: Bearer {{enterpriseToken}}
+Content-Type: application/json
+
+{
+  "verified": true,
+  "notes": "HR confirmed employment via email"
+}
+
+###
+
+GET {{baseUrl}}/company/insights
+Authorization: Bearer {{enterpriseToken}}
+
+###
+
+GET {{baseUrl}}/company/audit-logs
+Authorization: Bearer {{enterpriseToken}}
+
+###

@@ -36,3 +36,23 @@ export const createJoinRequestSchema = z.object({
 export const createQrSchema = z.object({
   label: z.string().min(1),
 });
+
+export const teamEmployeesQuerySchema = z.object({
+  department: z.string().optional(),
+  search: z.string().optional(),
+  employmentStatus: z.enum(['active', 'on_leave', 'terminated', 'probation']).optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
+export const accessRequestsQuerySchema = z.object({
+  status: z.enum(['all', 'pending', 'approved', 'rejected', 'accepted']).optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
+export const createAccessRequestSchema = z.object({
+  employeeUserId: z.string().min(1),
+  requestType: z.enum(['profile_access', 'background_check', 'verification_data']).optional(),
+  message: z.string().max(500).optional(),
+});

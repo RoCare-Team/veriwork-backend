@@ -151,6 +151,7 @@ export async function getWorkforce(user) {
           role: req.role,
           department: req.department,
           employeeScore: req.employeeScore,
+          employmentStatus: req.employmentStatus,
           joiningDate: req.joiningDate,
           status: req.status,
         };
@@ -166,6 +167,8 @@ export async function getWorkforce(user) {
         role: profile?.role || req.role,
         department: req.department,
         employeeScore: profile ? calculateEmployeeScore(profile, jobs) : req.employeeScore,
+        trustScore: profile ? calculateEmployeeScore(profile, jobs) : req.employeeScore,
+        employmentStatus: req.employmentStatus,
         veriworkId: profile?.veriworkId,
         joiningDate: req.joiningDate,
         status: req.status,

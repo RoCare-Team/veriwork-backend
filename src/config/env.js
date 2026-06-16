@@ -67,4 +67,9 @@ export const env = Object.freeze({
   },
 
   isDev: process.env.NODE_ENV !== "production",
+
+  google: {
+    clientId: process.env.GOOGLE_CLIENT_ID || "",
+    enabled: Boolean(process.env.GOOGLE_CLIENT_ID),
+  },
 });

@@ -1,8 +1,7 @@
 import multer from 'multer';
 import { env } from '../config/env.js';
 
-const ALLOWED_MIME_TYPES = new Set([
-  'application/pdf',
+const IMAGE_TYPES = new Set([
   'image/jpeg',
   'image/jpg',
   'image/png',
@@ -10,16 +9,24 @@ const ALLOWED_MIME_TYPES = new Set([
   'image/gif',
 ]);
 
-function fileFilter(_req, file, cb) {
-  if (ALLOWED_MIME_TYPES.has(file.mimetype)) {
-    cb(null, true);
-    return;
-  }
-  cb(new Error('Only PDF and image files are allowed (max 10MB)'));
+const DOC_TYPES = new Set([
+  'application/pdf',
+  ...IMAGE_TYPES,
+]);
+
+function createUpload(allowedTypes, maxMb = env.upload.maxFileSizeMb) {
+  return multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: maxMb * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+      if (allowedTypes.has(file.mimetype)) {
+        cb(null, true);
+        return;
+      }
+      cb(new Error('File type not allowed'));
+    },
+  });
 }
 
-export const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: env.upload.maxFileSizeMb * 1024 * 1024 },
-  fileFilter,
-});
+export const upload = createUpload(DOC_TYPES);
+export const uploadPhoto = createUpload(IMAGE_TYPES, 5);

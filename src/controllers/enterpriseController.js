@@ -1,4 +1,7 @@
 import * as enterpriseService from '../services/enterpriseService.js';
+import * as teamService from '../services/teamService.js';
+import * as accessRequestService from '../services/accessRequestService.js';
+import * as insightsService from '../services/insightsService.js';
 
 export async function getOnboarding(req, res) {
   const data = await enterpriseService.getOnboarding(req.user);
@@ -63,4 +66,39 @@ export async function listQrCodes(req, res) {
 export async function createQrCode(req, res) {
   const code = await enterpriseService.createQrCode(req.user, req.body.label);
   res.status(201).json({ success: true, data: code });
+}
+
+export async function getDepartments(req, res) {
+  const data = await teamService.getDepartments(req.user);
+  res.json({ success: true, data });
+}
+
+export async function listTeamEmployees(req, res) {
+  const data = await teamService.listTeamEmployees(req.user, req.query);
+  res.json({ success: true, data });
+}
+
+export async function getTeamEmployee(req, res) {
+  const data = await teamService.getTeamEmployee(req.user, req.params.id);
+  res.json({ success: true, data });
+}
+
+export async function createAccessRequest(req, res) {
+  const data = await accessRequestService.createAccessRequest(req.user, req.body);
+  res.status(201).json({ success: true, data });
+}
+
+export async function listAccessRequests(req, res) {
+  const data = await accessRequestService.listAccessRequests(req.user, req.query);
+  res.json({ success: true, data });
+}
+
+export async function getAccessRequest(req, res) {
+  const data = await accessRequestService.getAccessRequest(req.user, req.params.id);
+  res.json({ success: true, data });
+}
+
+export async function getInsights(req, res) {
+  const data = await insightsService.getCompanyInsights(req.user);
+  res.json({ success: true, data });
 }
