@@ -1,11 +1,17 @@
 import { ApiError } from '../utils/ApiError.js';
 import { env } from '../config/env.js';
+import { toMongoApiError } from '../utils/mongoErrors.js';
 
 export function notFoundHandler(_req, _res, next) {
   next(ApiError.notFound('Route not found'));
 }
 
 export function errorHandler(err, _req, res, _next) {
+  const mongoError = toMongoApiError(err);
+  if (mongoError) {
+    err = mongoError;
+  }
+
   if (err.name === 'MulterError') {
     return res.status(400).json({
       success: false,

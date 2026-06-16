@@ -15,10 +15,15 @@ const devDefaults = {
 };
 
 const required = (key) => {
-  const value = process.env[key] ?? devDefaults[key];
+  let value = process.env[key] ?? devDefaults[key];
 
   if (!value || value.trim() === "") {
     throw new Error(`Missing required environment variable: ${key}`);
+  }
+
+  value = value.trim();
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    value = value.slice(1, -1).trim();
   }
 
   return value;

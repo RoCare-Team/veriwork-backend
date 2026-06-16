@@ -8,7 +8,7 @@ import path from 'path';
 import { env } from './config/env.js';
 import { swaggerSpec } from './config/swagger.js';
 import routes from './routes/index.js';
-import { connectDatabase } from './config/database.js';
+import { connectDatabase, getDatabaseStatus } from './config/database.js';
 import { notFoundHandler, errorHandler } from './middleware/errorHandler.js';
 
 const app = express();
@@ -33,6 +33,16 @@ app.use(cors({ origin: env.corsOrigin, credentials: true }));
 app.use(morgan(env.isDev ? 'dev' : 'combined'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+app.get('/api/health', (_req, res) => {
+  const db = getDatabaseStatus();
+  res.status(db.connected ? 200 : 503).json({
+    success: db.connected,
+    message: db.connected ? 'VeriWork API is running' : 'API up but database not connected',
+    db,
+  });
+});
+
 app.use(async (_req, _res, next) => {
   try {
     await ensureDbConnected();
@@ -43,10 +53,6 @@ app.use(async (_req, _res, next) => {
 });
 
 app.use('/uploads', express.static(path.resolve(env.upload.dir)));
-
-app.get('/api/health', (_req, res) => {
-  res.json({ success: true, message: 'VeriWork API is running' });
-});
 
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.use('/api', routes);
