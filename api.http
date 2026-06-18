@@ -221,10 +221,21 @@ Authorization: Bearer {{enterpriseToken}}
 Content-Type: application/json
 
 {
-  "employeeEmail": "rahul.mehta@email.com",
+  "employeeName": "Robin Khan",
+  "employeeEmail": "new.employee@email.com",
+  "employeeMobile": "+919999988877",
   "department": "Engineering",
-  "designation": "Senior Software Engineer"
+  "designation": "Software Developer"
 }
+
+###
+
+GET {{baseUrl}}/company/invitations/pending
+Authorization: Bearer {{enterpriseToken}}
+
+###
+
+GET {{baseUrl}}/public/employee-invitation/INVITATION_TOKEN_HERE
 
 ###
 
@@ -243,13 +254,34 @@ Authorization: Bearer {{enterpriseToken}}
 
 ###
 
+GET {{baseUrl}}/company/employees/{{employeeId}}/documents
+Authorization: Bearer {{enterpriseToken}}
+
+###
+
+GET {{baseUrl}}/company/employees/{{employeeId}}
+Authorization: Bearer {{enterpriseToken}}
+
+###
+
+POST {{baseUrl}}/company/employees/{{employeeId}}/revoke-access
+Authorization: Bearer {{enterpriseToken}}
+Content-Type: application/json
+
+{
+  "requestType": "profile_access"
+}
+
+###
+
 POST {{baseUrl}}/company/access-request
 Authorization: Bearer {{enterpriseToken}}
 Content-Type: application/json
 
 {
   "employeeId": "EMPLOYEE_USER_ID_HERE",
-  "requestType": "profile_access"
+  "requestType": "profile_access",
+  "message": "We need your profile for onboarding review."
 }
 
 ###

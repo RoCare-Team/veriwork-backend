@@ -14,6 +14,7 @@ const companyEmployeeInvitationSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    employeeName: { type: String, default: '' },
     employeeEmail: { type: String, default: '' },
     employeeMobile: { type: String, default: '' },
     employeeVeriworkId: { type: String, default: '' },
@@ -32,6 +33,10 @@ const companyEmployeeInvitationSchema = new mongoose.Schema(
     },
     invitedAt: { type: Date, default: Date.now },
     respondedAt: { type: Date, default: null },
+    registrationToken: { type: String, default: null, index: true },
+    registrationTokenExpiresAt: { type: Date, default: null },
+    autoJoinOnSetup: { type: Boolean, default: false },
+    emailSentAt: { type: Date, default: null },
   },
   { timestamps: true },
 );

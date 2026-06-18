@@ -10,6 +10,7 @@ import {
   createVerificationRequestSchema,
   emailVerificationCompleteSchema,
   inviteEmployeeSchema,
+  revokeAccessSchema,
 } from '../validators/companyValidators.js';
 
 const router = Router();
@@ -18,13 +19,23 @@ router.use(authenticate, requireRole('enterprise_admin'), requireCompanyApproved
 
 // 1. Employee linking
 router.post('/invite-employee', validate(inviteEmployeeSchema), asyncHandler(companyController.inviteEmployee));
+router.get('/invitations/pending', asyncHandler(companyController.listPendingInvitations));
 
 // 2. Workforce management
 router.get('/team', asyncHandler(companyController.getTeam));
 router.get('/team/:department', asyncHandler(companyController.getDepartmentTeam));
+router.get('/employees/:employeeId', asyncHandler(companyController.getEmployeeById));
 router.get('/employees/:employeeId/profile', asyncHandler(companyController.getEmployeeProfile));
+router.get('/employees/:employeeId/documents', asyncHandler(companyController.getEmployeeDocuments));
+router.get('/employees/:employeeId/access-status', asyncHandler(companyController.getEmployeeAccessStatus));
+router.post(
+  '/employees/:employeeId/revoke-access',
+  validate(revokeAccessSchema),
+  asyncHandler(companyController.revokeEmployeeAccess),
+);
 
 // 3. Access request & consent
+router.get('/access-request-types', asyncHandler(companyController.listAccessRequestTypes));
 router.post('/access-request', validate(companyAccessRequestSchema), asyncHandler(companyController.createAccessRequest));
 router.get('/access-requests', asyncHandler(companyController.listAccessRequests));
 

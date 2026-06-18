@@ -77,4 +77,16 @@ export const env = Object.freeze({
     clientId: process.env.GOOGLE_CLIENT_ID || "",
     enabled: Boolean(process.env.GOOGLE_CLIENT_ID),
   },
+
+  frontendUrl: process.env.FRONTEND_URL || process.env.CORS_ORIGIN || "http://localhost:5173",
+
+  email: {
+    enabled: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
+    from: process.env.EMAIL_FROM || "PagerLook <noreply@pagerlook.com>",
+    smtpHost: process.env.SMTP_HOST || "",
+    smtpPort: Number(process.env.SMTP_PORT) || 587,
+    smtpSecure: process.env.SMTP_SECURE === "true",
+    smtpUser: process.env.SMTP_USER || "",
+    smtpPass: process.env.SMTP_PASS || "",
+  },
 });

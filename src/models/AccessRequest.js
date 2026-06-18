@@ -29,13 +29,13 @@ const accessRequestSchema = new mongoose.Schema(
     employeeName: { type: String, required: true },
     requestType: {
       type: String,
-      enum: ['profile_access', 'background_check', 'verification_data'],
+      enum: ['profile_access', 'background_check', 'verification_data', 'full_profile_access'],
       default: 'profile_access',
     },
     message: { type: String, default: '' },
     status: {
       type: String,
-      enum: ['pending', 'approved', 'rejected', 'accepted'],
+      enum: ['pending', 'approved', 'rejected', 'accepted', 'revoked'],
       default: 'pending',
       index: true,
     },

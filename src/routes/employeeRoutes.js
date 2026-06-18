@@ -8,6 +8,7 @@ import {
   updateProfileSchema,
   setupProfileSchema,
   aadhaarVerifySchema,
+  endorseEmployeeSchema,
   createJobSchema,
   activityActionSchema,
   createVaultItemSchema,
@@ -39,6 +40,8 @@ router.patch(
 );
 
 router.get('/score', asyncHandler(employeeController.getScore));
+router.get('/endorsements', asyncHandler(employeeController.listEndorsements));
+router.post('/endorse', validate(endorseEmployeeSchema), asyncHandler(employeeController.endorseEmployee));
 
 router.get('/professional-id', asyncHandler(employeeController.getProfessionalId));
 

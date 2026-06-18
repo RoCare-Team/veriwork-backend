@@ -12,6 +12,7 @@ import {
 } from './scoreService.js';
 import { ApiError } from '../utils/ApiError.js';
 import { storeUploadedFile } from '../utils/fileUpload.js';
+import { autoJoinAfterProfileSetup } from './invitationService.js';
 
 export async function getOrCreateEmployeeUser(phone) {
   const normalized = normalizePhone(phone);
@@ -195,9 +196,17 @@ export async function updateEmployeeProfile(userId, data, photoFile = null) {
   const jobs = await getJobsForUser(userId);
   const profileData = buildProfileResponse(profile, jobs);
 
+  let invitationResult = null;
+  if (profile.profileSetupComplete) {
+    invitationResult = await autoJoinAfterProfileSetup(userId, {
+      invitationToken: data.invitationToken,
+    });
+  }
+
   return {
     ...profileData,
     nextRoute: profile.profileSetupComplete ? '/employee/verification' : '/employee/profile-setup',
+    invitationResult,
   };
 }
 
@@ -312,11 +321,25 @@ export async function getEmployeeScore(userId) {
 
   const jobs = await getJobsForUser(userId);
   const score = calculateEmployeeScore(profile, jobs);
+  const factors = getScoreFactors(profile, jobs);
+  const endorsementFactor = factors.find((f) => f.id === 'endorsements');
 
   return {
     employeeScore: score,
+    veriScore: score,
+    trustScore: score,
+    minScore: 300,
+    maxScore: 900,
     scoreRating: getScoreRating(score),
     percentile: getScorePercentile(score),
-    factors: getScoreFactors(profile, jobs),
+    factors,
+    endorsements: {
+      count: profile.endorsements || 0,
+      maxCount: 8,
+      points: endorsementFactor?.points || 0,
+      maxPoints: endorsementFactor?.max || 60,
+      pointsPerEndorsement: 8,
+      tip: endorsementFactor?.tip || 'Get endorsed by colleagues and managers',
+    },
   };
 }

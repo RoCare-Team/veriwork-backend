@@ -36,6 +36,7 @@ export const updateProfileSchema = z.object({
   permanentAddress: z.string().max(300).optional(),
   sameAsCurrentAddress: sameAddressField,
   skills: z.array(z.string()).optional(),
+  invitationToken: z.string().min(10).optional(),
 });
 
 export const setupProfileSchema = z
@@ -54,6 +55,7 @@ export const setupProfileSchema = z
     currentAddress: z.string().min(1, 'Current address is required').max(300),
     permanentAddress: z.string().max(300).optional(),
     sameAsCurrentAddress: sameAddressField,
+    invitationToken: z.string().min(10).optional(),
   })
   .superRefine((data, ctx) => {
     if (!data.sameAsCurrentAddress && !data.permanentAddress?.trim()) {
@@ -69,6 +71,12 @@ export const aadhaarVerifySchema = z.object({
   method: z.enum(['digilocker', 'otp']).default('digilocker'),
   aadhaarNumber: z.string().optional(),
   otp: z.string().optional(),
+});
+
+export const endorseEmployeeSchema = z.object({
+  veriworkId: z.string().min(3, 'PagerLook ID is required'),
+  message: z.string().max(300).optional(),
+  relationship: z.enum(['colleague', 'manager', 'hr', 'other']).default('colleague'),
 });
 
 export const createJobSchema = z.object({

@@ -1,22 +1,49 @@
 import { AccessRequest } from '../models/AccessRequest.js';
 import { Company } from '../models/Company.js';
-import { CompanyEmployee } from '../models/CompanyEmployee.js';
 import { CompanyEmployeeInvitation } from '../models/CompanyEmployeeInvitation.js';
 import { ActivityLog } from '../models/ActivityLog.js';
 import { EmployeeProfile } from '../models/EmployeeProfile.js';
 import { ApiError } from '../utils/ApiError.js';
 import { assertValidObjectId } from '../utils/objectId.js';
 import {
+  acceptInvitationInternal,
+  linkPendingInvitationsToUser,
+} from './invitationService.js';
+import {
   writeAccessAuditFromEmployee,
   writeInvitationAuditFromEmployee,
 } from './companyLinkingService.js';
+import { ACCESS_LABELS } from './employeeAccessService.js';
 
 async function findInvitationForEmployee(userId, invitationId) {
   const validId = assertValidObjectId(invitationId, 'invitation id');
-  const invitation = await CompanyEmployeeInvitation.findOne({
+  await linkPendingInvitationsToUser(userId);
+
+  let invitation = await CompanyEmployeeInvitation.findOne({
     _id: validId,
     employeeId: userId,
   });
+
+  if (!invitation) {
+    const profile = await EmployeeProfile.findOne({ userId }).select('email phone veriworkId');
+    const matchers = [
+      ...(profile?.email ? [{ employeeEmail: profile.email.toLowerCase() }] : []),
+      ...(profile?.phone ? [{ employeeMobile: profile.phone }] : []),
+      ...(profile?.veriworkId ? [{ employeeVeriworkId: profile.veriworkId }] : []),
+    ];
+    if (matchers.length) {
+      invitation = await CompanyEmployeeInvitation.findOne({
+        _id: validId,
+        status: 'pending',
+        $or: matchers,
+      });
+      if (invitation && !invitation.employeeId) {
+        invitation.employeeId = userId;
+        await invitation.save();
+      }
+    }
+  }
+
   if (!invitation) throw ApiError.notFound('Invitation not found');
   return invitation;
 }
@@ -29,36 +56,12 @@ function mapInvitation(invitation, companyName) {
     department: invitation.department,
     designation: invitation.designation,
     status: invitation.status,
+    dashboardStatus: invitation.status === 'pending' ? 'Invitation Sent' : invitation.status,
   };
 }
 
 export async function listEmployeeInvitations(userId) {
-  const profile = await EmployeeProfile.findOne({ userId }).select('email phone veriworkId');
-  if (profile) {
-    const matchers = [
-      ...(profile.email ? [{ employeeEmail: profile.email.toLowerCase() }] : []),
-      ...(profile.phone ? [{ employeeMobile: profile.phone }] : []),
-      ...(profile.veriworkId ? [{ employeeVeriworkId: profile.veriworkId }] : []),
-    ];
-
-    if (matchers.length) {
-    const pendingRegistration = await CompanyEmployeeInvitation.find({
-      employeeId: null,
-      status: 'pending_registration',
-      $or: matchers,
-    });
-
-      if (pendingRegistration.length) {
-        await Promise.all(
-          pendingRegistration.map((invitation) => {
-            invitation.employeeId = userId;
-            invitation.status = 'pending';
-            return invitation.save();
-          }),
-        );
-      }
-    }
-  }
+  await linkPendingInvitationsToUser(userId);
 
   const invitations = await CompanyEmployeeInvitation.find({
     employeeId: userId,
@@ -78,29 +81,13 @@ export async function acceptInvitation(userId, invitationId) {
     throw ApiError.badRequest('Only pending invitations can be accepted');
   }
 
-  invitation.status = 'accepted';
-  invitation.respondedAt = new Date();
-  await invitation.save();
-
-  await CompanyEmployee.findOneAndUpdate(
-    { companyId: invitation.companyId, employeeId: userId },
-    {
-      companyId: invitation.companyId,
-      employeeId: userId,
-      department: invitation.department,
-      designation: invitation.designation,
-      employmentStatus: 'active',
-      joinedAt: new Date(),
-    },
-    { upsert: true, new: true, setDefaultsOnInsert: true },
-  );
-
-  await writeInvitationAuditFromEmployee(invitation, 'invitation_accepted');
+  await acceptInvitationInternal(invitation, userId);
 
   return {
     id: invitation._id,
     invitationId: invitation._id,
-    status: invitation.status,
+    status: 'accepted',
+    dashboardStatus: 'Linked Employee',
     respondedAt: invitation.respondedAt,
   };
 }
@@ -136,6 +123,8 @@ function mapAccessRequest(request, companyName) {
     companyId: request.companyId,
     companyName,
     requestType: request.requestType,
+    requestTypeLabel: ACCESS_LABELS[request.requestType] || request.requestType,
+    message: request.message || '',
     status: normalizeAccessStatus(request.status),
     requestedAt: request.requestedAt || request.createdAt,
     respondedAt: request.respondedAt,
@@ -161,9 +150,6 @@ async function updateAccessRequestStatus(userId, requestId, status) {
     $or: [{ employeeId: userId }, { employeeUserId: userId }],
   });
   if (!request) throw ApiError.notFound('Access request not found');
-  if (!['pending', 'accepted'].includes(request.status) && request.status !== 'approved') {
-    throw ApiError.badRequest('Access request already processed');
-  }
   if (normalizeAccessStatus(request.status) !== 'pending') {
     throw ApiError.badRequest('Access request already processed');
   }

@@ -27,6 +27,7 @@ const companyAuditLogSchema = new mongoose.Schema(
         'access_request_created',
         'access_request_approved',
         'access_request_rejected',
+        'access_request_revoked',
         'verification_request_created',
         'verification_request_approved',
         'verification_request_rejected',

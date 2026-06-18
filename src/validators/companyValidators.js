@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const inviteEmployeeSchema = z.object({
+  employeeName: z.string().min(1, 'Employee name is required'),
   employeeEmail: z.string().email().optional(),
   employeeMobile: z.string().min(10).optional(),
   employeePagerlookId: z.string().min(3).optional(),
@@ -18,7 +19,13 @@ export const inviteEmployeeSchema = z.object({
 
 export const companyAccessRequestSchema = z.object({
   employeeId: z.string().min(1),
-  requestType: z.enum(['profile_access', 'background_check', 'verification_data']).default('profile_access'),
+  requestType: z.enum([
+    'profile_access',
+    'background_check',
+    'verification_data',
+    'full_profile_access',
+  ]).default('profile_access'),
+  message: z.string().max(500).optional(),
 });
 
 export const createVerificationRequestSchema = z.object({
@@ -31,6 +38,15 @@ export const createVerificationRequestSchema = z.object({
 export const emailVerificationCompleteSchema = z.object({
   verified: z.boolean(),
   notes: z.string().max(500).optional(),
+});
+
+export const revokeAccessSchema = z.object({
+  requestType: z.enum([
+    'profile_access',
+    'background_check',
+    'verification_data',
+    'full_profile_access',
+  ]).optional(),
 });
 
 export const auditLogsQuerySchema = z.object({

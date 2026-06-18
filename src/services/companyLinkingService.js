@@ -4,6 +4,7 @@ import { Company } from '../models/Company.js';
 import { CompanyAuditLog } from '../models/CompanyAuditLog.js';
 import { CompanyEmployee } from '../models/CompanyEmployee.js';
 import { CompanyEmployeeInvitation } from '../models/CompanyEmployeeInvitation.js';
+import { Document } from '../models/Document.js';
 import { EmployeeProfile } from '../models/EmployeeProfile.js';
 import { JobExperience } from '../models/JobExperience.js';
 import { VaultItem } from '../models/VaultItem.js';
@@ -13,9 +14,24 @@ import { assertValidObjectId } from '../utils/objectId.js';
 import {
   calculateEmployeeScore,
   getScoreRating,
+  getScoreFactors,
   getVerificationPercent,
   isVerificationComplete,
 } from './scoreService.js';
+import {
+  getEmployeeAccessGrants,
+  requireEmployeeAccess,
+  getConsentScope,
+  getAccessRequestTitle,
+  getAccessRequestMessage,
+  ACCESS_TYPES,
+  ACCESS_LABELS,
+} from './employeeAccessService.js';
+import {
+  generateRegistrationToken,
+  sendInvitationNotifications,
+  buildEmployeeJoinLink,
+} from './invitationService.js';
 
 function requireCompanyId(user) {
   if (!user.companyId) throw ApiError.forbidden('No company associated with this account');
@@ -63,7 +79,12 @@ async function resolveEmployee({ employeeEmail, employeeMobile, employeePagerloo
 export async function inviteEmployee(user, payload) {
   const companyId = requireCompanyId(user);
   const employeeId = await resolveEmployee(payload);
-  const status = employeeId ? 'pending' : 'pending_registration';
+  const isRegistered = Boolean(employeeId);
+  const status = isRegistered ? 'pending' : 'pending_registration';
+
+  if (!isRegistered && !payload.employeeEmail) {
+    throw ApiError.badRequest('Employee email is required to invite an unregistered employee');
+  }
 
   const existingPending = await CompanyEmployeeInvitation.findOne({
     companyId,
@@ -80,9 +101,15 @@ export async function inviteEmployee(user, payload) {
     throw ApiError.conflict('Pending invitation already exists for this employee');
   }
 
+  const registrationToken = isRegistered ? null : generateRegistrationToken();
+  const registrationTokenExpiresAt = registrationToken
+    ? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+    : null;
+
   const invitation = await CompanyEmployeeInvitation.create({
     companyId,
     employeeId,
+    employeeName: payload.employeeName?.trim() || '',
     employeeEmail: payload.employeeEmail?.toLowerCase() || '',
     employeeMobile: payload.employeeMobile || '',
     employeeVeriworkId: payload.employeePagerlookId || '',
@@ -91,21 +118,22 @@ export async function inviteEmployee(user, payload) {
     status,
     invitedBy: user._id,
     invitedAt: new Date(),
+    registrationToken,
+    registrationTokenExpiresAt,
+    autoJoinOnSetup: !isRegistered,
   });
 
-  if (employeeId) {
-    const company = await Company.findById(companyId).select('name');
-    await ActivityLog.create({
-      userId: employeeId,
-      type: 'system',
-      title: 'Company invitation received',
-      message: `${company?.name || 'A company'} invited you to join ${payload.department || 'their team'}`,
-      company: company?.name || '',
-      status: 'pending',
-      metadata: {
-        invitationId: invitation._id.toString(),
-      },
-    });
+  const company = await Company.findById(companyId).select('name');
+  const notification = await sendInvitationNotifications({
+    invitation,
+    companyName: company?.name || 'Company',
+    employeeName: payload.employeeName,
+    isRegistered,
+  });
+
+  if (notification.emailSent) {
+    invitation.emailSentAt = new Date();
+    await invitation.save();
   }
 
   await createCompanyAuditLog({
@@ -117,12 +145,108 @@ export async function inviteEmployee(user, payload) {
     entityId: invitation._id,
     metadata: {
       status,
+      employeeName: invitation.employeeName,
       department: invitation.department,
       designation: invitation.designation,
+      emailSent: notification.emailSent,
+      emailMock: notification.emailMock,
+      caseType: isRegistered ? 'registered' : 'not_registered',
     },
   });
 
-  return invitation;
+  return {
+    ...invitation.toObject(),
+    caseType: isRegistered ? 'registered' : 'not_registered',
+    emailSent: notification.emailSent,
+    emailMock: notification.emailMock,
+    registrationLink: registrationToken ? buildEmployeeJoinLink(registrationToken) : null,
+    joinLink: notification.joinLink,
+    dashboardStatus: isRegistered ? 'Invitation Sent' : 'Pending Registration',
+  };
+}
+
+export async function listPendingInvitations(user) {
+  const companyId = requireCompanyId(user);
+  const invitations = await CompanyEmployeeInvitation.find({
+    companyId,
+    status: { $in: ['pending', 'pending_registration'] },
+  }).sort({ createdAt: -1 });
+
+  return invitations.map((invitation) => ({
+    id: invitation._id,
+    invitationId: invitation._id,
+    employeeId: invitation.employeeId,
+    employeeName: invitation.employeeName,
+    employeeEmail: invitation.employeeEmail,
+    employeeMobile: invitation.employeeMobile,
+    department: invitation.department,
+    designation: invitation.designation,
+    status: invitation.status,
+    dashboardStatus: invitation.status === 'pending_registration'
+      ? 'Pending Registration'
+      : 'Invitation Sent',
+    emailSent: Boolean(invitation.emailSentAt),
+    invitedAt: invitation.invitedAt,
+    registrationLink: invitation.registrationToken
+      ? buildEmployeeJoinLink(invitation.registrationToken)
+      : null,
+  }));
+}
+
+async function buildTeamEmployeeCard(companyId, link) {
+  const [profile, jobs, access] = await Promise.all([
+    EmployeeProfile.findOne({ userId: link.employeeId }),
+    JobExperience.find({ userId: link.employeeId }),
+    getEmployeeAccessGrants(companyId, link.employeeId),
+  ]);
+
+  const trustScore = profile ? calculateEmployeeScore(profile, jobs) : 300;
+  const employeeId = link.employeeId.toString();
+
+  const hasPending = access.pendingRequests.length > 0;
+  const hasGranted = access.hasAnyAccess;
+
+  let accessButton = 'request_access';
+  let accessButtonLabel = 'Request Access';
+  if (hasPending) {
+    accessButton = 'pending';
+    accessButtonLabel = 'Access Pending';
+  } else if (hasGranted) {
+    accessButton = 'remove_access';
+    accessButtonLabel = 'Remove Access';
+  }
+
+  return {
+    employeeId,
+    id: employeeId,
+    employeeName: profile?.name || 'Unknown Employee',
+    role: link.designation || profile?.role || '',
+    designation: link.designation || profile?.role || '',
+    trustScore,
+    trustScoreMax: 900,
+    employmentStatus: link.employmentStatus,
+    statusLabel: link.employmentStatus === 'active' ? 'ACTIVE' : link.employmentStatus.toUpperCase(),
+    department: link.department || 'Unassigned',
+    photoUrl: profile?.photoUrl || '',
+    veriworkId: profile?.veriworkId || null,
+    joinedAt: link.joinedAt,
+    isVerified: profile ? isVerificationComplete(profile) : false,
+    access: {
+      fullProfileAccess: access.fullProfileAccess,
+      profileAccess: access.profileAccess,
+      backgroundCheck: access.backgroundCheck,
+      verificationData: access.verificationData,
+      hasAnyAccess: access.hasAnyAccess,
+      hasAllAccess: access.hasAllAccess,
+      showFullProfileButton: access.showFullProfileButton,
+      pendingRequests: access.pendingRequests,
+      approvedRequests: access.approvedRequests,
+    },
+    accessButton,
+    accessButtonLabel,
+    profilePath: `/company/team/${employeeId}`,
+    profileApiPath: `/api/company/employees/${employeeId}/profile`,
+  };
 }
 
 async function buildTeamEmployees(companyId, department = null) {
@@ -131,26 +255,7 @@ async function buildTeamEmployees(companyId, department = null) {
 
   const links = await CompanyEmployee.find(filter).sort({ createdAt: -1 });
 
-  const employees = await Promise.all(
-    links.map(async (link) => {
-      const [profile, jobs] = await Promise.all([
-        EmployeeProfile.findOne({ userId: link.employeeId }),
-        JobExperience.find({ userId: link.employeeId }),
-      ]);
-
-      const trustScore = profile ? calculateEmployeeScore(profile, jobs) : 300;
-      return {
-        employeeId: link.employeeId,
-        employeeName: profile?.name || 'Unknown Employee',
-        role: link.designation || profile?.role || '',
-        trustScore,
-        employmentStatus: link.employmentStatus,
-        department: link.department || 'Unassigned',
-      };
-    }),
-  );
-
-  return employees;
+  return Promise.all(links.map((link) => buildTeamEmployeeCard(companyId, link)));
 }
 
 export async function getCompanyTeam(user) {
@@ -173,7 +278,11 @@ export async function getCompanyTeam(user) {
     employees: list,
   }));
 
-  return { departments };
+  return {
+    departments,
+    employees,
+    totalEmployees: employees.length,
+  };
 }
 
 export async function getDepartmentDetails(user, department) {
@@ -203,6 +312,7 @@ export async function createCompanyAccessRequest(user, payload) {
 
   const profile = await EmployeeProfile.findOne({ userId: payload.employeeId });
   const company = await Company.findById(companyId).select('name');
+  const requestType = payload.requestType || ACCESS_TYPES.PROFILE;
 
   const accessRequest = await AccessRequest.create({
     companyId,
@@ -210,22 +320,27 @@ export async function createCompanyAccessRequest(user, payload) {
     employeeId: payload.employeeId,
     employeeUserId: payload.employeeId,
     employeeName: profile?.name || '',
-    requestType: payload.requestType,
+    requestType,
+    message: payload.message || '',
     status: 'pending',
     requestedAt: new Date(),
     metadata: {
-      consentScope: ['trust_score', 'employment_history', 'verification_status', 'document_metadata'],
+      consentScope: getConsentScope(requestType),
     },
   });
 
   await ActivityLog.create({
     userId: payload.employeeId,
     type: 'access_request',
-    title: 'Company access request',
-    message: `${company?.name || 'A company'} requested access to your profile data`,
+    title: getAccessRequestTitle(requestType),
+    message: payload.message?.trim()
+      || getAccessRequestMessage(company?.name || 'A company', requestType),
     company: company?.name || '',
     status: 'pending',
-    metadata: { accessRequestId: accessRequest._id.toString() },
+    metadata: {
+      accessRequestId: accessRequest._id.toString(),
+      requestType,
+    },
   });
 
   await createCompanyAuditLog({
@@ -247,6 +362,8 @@ function mapCompanyAccessRequest(request) {
     employeeId: request.employeeId || request.employeeUserId,
     employeeName: request.employeeName,
     requestType: request.requestType,
+    message: request.message || '',
+    requestTypeLabel: ACCESS_LABELS[request.requestType] || request.requestType,
     status: normalizeStatus(request.status),
     requestedAt: request.requestedAt || request.createdAt,
     respondedAt: request.respondedAt,
@@ -372,13 +489,71 @@ function parseMonthKey(dateValue) {
   return `${year}-${month}`;
 }
 
-async function hasApprovedAccess(companyId, employeeId) {
-  const approved = await AccessRequest.findOne({
+async function hasApprovedAccess(companyId, employeeId, requestType = null) {
+  const filter = {
     companyId,
     $or: [{ employeeId }, { employeeUserId: employeeId }],
     status: { $in: ['approved', 'accepted'] },
-  });
+  };
+  if (requestType) filter.requestType = requestType;
+  const approved = await AccessRequest.findOne(filter);
   return Boolean(approved);
+}
+
+function buildEmploymentHistory(jobs) {
+  return jobs.map((job) => ({
+    id: job._id,
+    title: job.title,
+    company: job.company,
+    employmentType: job.employmentType,
+    joiningDate: job.joiningDate,
+    exitDate: job.exitDate,
+    isPresent: job.isPresent,
+    status: job.status,
+    duration: job.duration,
+    salaryBand: job.salaryBand,
+  }));
+}
+
+function buildVerificationSection(profile, jobs, trustScore) {
+  const scoreFactors = profile ? getScoreFactors(profile, jobs) : [];
+  return {
+    trustScore,
+    scoreRating: getScoreRating(trustScore),
+    scoreFactors,
+    verificationStatus: {
+      profileSetupComplete: profile?.profileSetupComplete || false,
+      aadhaarVerified: profile?.aadhaarVerified || false,
+      panVerified: profile?.panVerified || false,
+      biometricVerified: profile?.biometricVerified || false,
+      digilockerUsed: profile?.digilockerUsed || false,
+      verificationPercent: profile ? getVerificationPercent(profile) : 0,
+      isComplete: profile ? isVerificationComplete(profile) : false,
+    },
+    verifiedJobsCount: jobs.filter((j) => j.status === 'verified').length,
+    totalJobsCount: jobs.length,
+  };
+}
+
+function buildProfileDetails(profile, link) {
+  return {
+    name: profile?.name || 'Unknown Employee',
+    email: profile?.email || '',
+    phone: profile?.phone || '',
+    dateOfBirth: profile?.dateOfBirth || '',
+    gender: profile?.gender || '',
+    role: link.designation || profile?.role || '',
+    department: link.department || 'Unassigned',
+    company: profile?.company || '',
+    totalExperience: profile?.totalExperience || '',
+    currentCity: profile?.currentCity || '',
+    currentAddress: profile?.currentAddress || '',
+    permanentAddress: profile?.permanentAddress || '',
+    skills: profile?.skills || [],
+    photoUrl: profile?.photoUrl || '',
+    veriworkId: profile?.veriworkId || null,
+    publicSlug: profile?.publicSlug || null,
+  };
 }
 
 export async function getEmployeeProfilePreview(user, employeeId) {
@@ -392,11 +567,11 @@ export async function getEmployeeProfilePreview(user, employeeId) {
   });
   if (!link) throw ApiError.notFound('Employee not found in your workforce');
 
-  const [profile, jobs, vaultItems, accessApproved] = await Promise.all([
+  const [profile, jobs, vaultItems, access] = await Promise.all([
     EmployeeProfile.findOne({ userId: validEmployeeId }),
     JobExperience.find({ userId: validEmployeeId }).sort({ createdAt: -1 }),
     VaultItem.find({ userId: validEmployeeId }),
-    hasApprovedAccess(companyId, validEmployeeId),
+    getEmployeeAccessGrants(companyId, validEmployeeId),
   ]);
 
   const trustScore = profile ? calculateEmployeeScore(profile, jobs) : 300;
@@ -410,52 +585,274 @@ export async function getEmployeeProfilePreview(user, employeeId) {
     employmentStatus: link.employmentStatus,
     veriworkId: profile?.veriworkId || null,
     isVerified: profile ? isVerificationComplete(profile) : false,
-    hasAccessApproval: accessApproved,
     joinedAt: link.joinedAt,
+    photoUrl: profile?.photoUrl || '',
   };
 
-  if (!accessApproved) {
-    return {
-      preview,
-      detailedProfile: null,
-      message: 'Submit an access request and wait for employee consent to view detailed profile',
-    };
+  const accessGrants = {
+    fullProfileAccess: access.fullProfileAccess,
+    profileAccess: access.profileAccess,
+    backgroundCheck: access.backgroundCheck,
+    verificationData: access.verificationData,
+    hasAllAccess: access.hasAllAccess,
+    showFullProfileButton: access.showFullProfileButton,
+    pendingRequests: access.pendingRequests,
+  };
+
+  const lockedSections = [];
+  if (!access.profileAccess) {
+    lockedSections.push({
+      key: 'profile',
+      label: 'Profile Details',
+      requestType: ACCESS_TYPES.PROFILE,
+      pending: access.pendingProfileAccess,
+    });
+  }
+  if (!access.backgroundCheck) {
+    lockedSections.push({
+      key: 'background',
+      label: 'Documents & Background',
+      requestType: ACCESS_TYPES.BACKGROUND,
+      pending: access.pendingBackgroundCheck,
+    });
+  }
+  if (!access.verificationData) {
+    lockedSections.push({
+      key: 'verification',
+      label: 'Verification Data',
+      requestType: ACCESS_TYPES.VERIFICATION,
+      pending: access.pendingVerificationData,
+    });
+  }
+  if (!access.fullProfileAccess && lockedSections.length === 3) {
+    lockedSections.unshift({
+      key: 'full_profile',
+      label: 'Get Full Profile Access',
+      requestType: ACCESS_TYPES.FULL_PROFILE,
+      pending: access.pendingFullProfileAccess,
+      description: 'Unlock profile, documents, and verification in one request',
+    });
   }
 
-  const vaultByCategory = vaultItems.reduce((acc, item) => {
-    acc[item.category] = (acc[item.category] || 0) + 1;
-    return acc;
-  }, {});
-
-  return {
+  const response = {
     preview,
-    detailedProfile: {
-      trustScore,
-      scoreRating: getScoreRating(trustScore),
-      verificationStatus: {
-        profileSetupComplete: profile?.profileSetupComplete || false,
-        aadhaarVerified: profile?.aadhaarVerified || false,
-        biometricVerified: profile?.biometricVerified || false,
-        verificationPercent: profile ? getVerificationPercent(profile) : 0,
-        isComplete: profile ? isVerificationComplete(profile) : false,
-      },
-      employmentHistory: jobs.map((job) => ({
-        id: job._id,
-        title: job.title,
-        company: job.company,
-        employmentType: job.employmentType,
-        joiningDate: job.joiningDate,
-        exitDate: job.exitDate,
-        isPresent: job.isPresent,
-        status: job.status,
-        duration: job.duration,
-      })),
-      documentMetadata: {
+    access: accessGrants,
+    lockedSections,
+    showFullProfileButton: access.showFullProfileButton,
+    profileSection: null,
+    employmentHistory: null,
+    documentsSection: null,
+    verificationSection: null,
+  };
+
+  if (access.profileAccess) {
+    response.profileSection = buildProfileDetails(profile, link);
+    response.employmentHistory = buildEmploymentHistory(jobs);
+  }
+
+  if (access.backgroundCheck) {
+    const vaultByCategory = vaultItems.reduce((acc, item) => {
+      acc[item.category] = (acc[item.category] || 0) + 1;
+      return acc;
+    }, {});
+
+    response.documentsSection = {
+      summary: {
         totalDocuments: vaultItems.length,
         verifiedDocuments: vaultItems.filter((item) => item.status === 'verified').length,
         byCategory: vaultByCategory,
       },
-    },
+      vaultItems: vaultItems.map((item) => ({
+        id: item._id,
+        category: item.category,
+        name: item.name,
+        status: item.status,
+        size: item.size,
+        uploadedAt: item.createdAt,
+      })),
+      viewDocumentsEndpoint: `/api/company/employees/${validEmployeeId}/documents`,
+    };
+  }
+
+  if (access.verificationData) {
+    response.verificationSection = buildVerificationSection(profile, jobs, trustScore);
+  }
+
+  return response;
+}
+
+export async function getEmployeeDocuments(user, employeeId) {
+  const companyId = requireCompanyId(user);
+  const validEmployeeId = assertValidObjectId(employeeId, 'employee id');
+
+  const link = await CompanyEmployee.findOne({
+    companyId,
+    employeeId: validEmployeeId,
+    employmentStatus: 'active',
+  });
+  if (!link) throw ApiError.notFound('Employee not found in your workforce');
+
+  await requireEmployeeAccess(companyId, validEmployeeId, ACCESS_TYPES.BACKGROUND);
+
+  const [vaultItems, jobDocs, jobs] = await Promise.all([
+    VaultItem.find({ userId: validEmployeeId }).sort({ createdAt: -1 }),
+    Document.find({ userId: validEmployeeId }).sort({ createdAt: -1 }),
+    JobExperience.find({ userId: validEmployeeId }).select('title company'),
+  ]);
+
+  const jobMap = new Map(jobs.map((j) => [j._id.toString(), j]));
+
+  const vaultWithFiles = await Promise.all(
+    vaultItems.map(async (item) => {
+      let file = null;
+      if (item.documentId) {
+        file = await Document.findById(item.documentId).select('fileName originalName url mimeType size status');
+      }
+      return {
+        id: item._id,
+        category: item.category,
+        name: item.name,
+        status: item.status,
+        size: item.size,
+        uploadedAt: item.createdAt,
+        file: file
+          ? {
+              id: file._id,
+              fileName: file.originalName || file.fileName,
+              url: file.url,
+              mimeType: file.mimeType,
+              status: file.status,
+            }
+          : null,
+      };
+    }),
+  );
+
+  const employmentDocuments = jobDocs.map((doc) => {
+    const job = doc.jobId ? jobMap.get(doc.jobId.toString()) : null;
+    return {
+      id: doc._id,
+      category: doc.category,
+      fileName: doc.originalName || doc.fileName,
+      url: doc.url,
+      mimeType: doc.mimeType,
+      status: doc.status,
+      jobTitle: job?.title || null,
+      company: job?.company || null,
+      uploadedAt: doc.createdAt,
+    };
+  });
+
+  return {
+    employeeId: validEmployeeId,
+    vaultDocuments: vaultWithFiles,
+    employmentDocuments,
+    totalCount: vaultWithFiles.length + employmentDocuments.length,
+  };
+}
+
+export async function getEmployeeAccessStatus(user, employeeId) {
+  const companyId = requireCompanyId(user);
+  const validEmployeeId = assertValidObjectId(employeeId, 'employee id');
+
+  const link = await CompanyEmployee.findOne({
+    companyId,
+    employeeId: validEmployeeId,
+    employmentStatus: 'active',
+  });
+  if (!link) throw ApiError.notFound('Employee not found in your workforce');
+
+  const access = await getEmployeeAccessGrants(companyId, validEmployeeId);
+  const hasPending = access.pendingRequests.length > 0;
+  const accessButton = hasPending
+    ? 'pending'
+    : access.hasAnyAccess
+      ? 'remove_access'
+      : 'request_access';
+
+  return {
+    employeeId: validEmployeeId.toString(),
+    ...access,
+    canViewProfileDetails: access.profileAccess,
+    canViewDocuments: access.backgroundCheck,
+    canViewVerification: access.verificationData,
+    accessButton,
+    accessButtonLabel: hasPending
+      ? 'Access Pending'
+      : access.hasAnyAccess
+        ? 'Remove Access'
+        : 'Request Access',
+    profilePath: `/company/team/${validEmployeeId}`,
+    profileApiPath: `/api/company/employees/${validEmployeeId}/profile`,
+  };
+}
+
+export async function revokeEmployeeAccess(user, employeeId, { requestType } = {}) {
+  const companyId = requireCompanyId(user);
+  const validEmployeeId = assertValidObjectId(employeeId, 'employee id');
+
+  const link = await CompanyEmployee.findOne({
+    companyId,
+    employeeId: validEmployeeId,
+    employmentStatus: 'active',
+  });
+  if (!link) throw ApiError.notFound('Employee not found in your workforce');
+
+  const filter = {
+    companyId,
+    $or: [{ employeeId: validEmployeeId }, { employeeUserId: validEmployeeId }],
+    status: { $in: ['approved', 'accepted'] },
+  };
+  if (requestType) filter.requestType = requestType;
+
+  const approved = await AccessRequest.find(filter);
+  if (!approved.length) {
+    throw ApiError.badRequest('No active access grants found to revoke');
+  }
+
+  const revokedAt = new Date();
+  await Promise.all(
+    approved.map(async (request) => {
+      request.status = 'revoked';
+      request.respondedAt = revokedAt;
+      request.metadata = {
+        ...request.metadata,
+        revokedBy: user._id.toString(),
+        revokedAt: revokedAt.toISOString(),
+      };
+      await request.save();
+
+      await createCompanyAuditLog({
+        companyId,
+        actorUserId: user._id,
+        employeeId: validEmployeeId,
+        action: 'access_request_revoked',
+        entityType: 'access_request',
+        entityId: request._id,
+        metadata: { requestType: request.requestType },
+      });
+    }),
+  );
+
+  const company = await Company.findById(companyId).select('name');
+  await ActivityLog.create({
+    userId: validEmployeeId,
+    type: 'system',
+    title: 'Company access revoked',
+    message: `${company?.name || 'A company'} removed access to your ${requestType || 'profile'} data`,
+    company: company?.name || '',
+    status: 'info',
+    metadata: { requestType: requestType || 'all', revokedByCompanyId: companyId.toString() },
+  });
+
+  const access = await getEmployeeAccessGrants(companyId, validEmployeeId);
+  return {
+    employeeId: validEmployeeId.toString(),
+    revokedCount: approved.length,
+    revokedTypes: [...new Set(approved.map((r) => r.requestType))],
+    access,
+    accessButton: access.hasAnyAccess ? 'remove_access' : 'request_access',
+    accessButtonLabel: access.hasAnyAccess ? 'Remove Access' : 'Request Access',
   };
 }
 

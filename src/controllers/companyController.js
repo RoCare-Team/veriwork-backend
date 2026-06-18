@@ -1,11 +1,14 @@
 import * as companyLinkingService from '../services/companyLinkingService.js';
 import * as verificationRequestService from '../services/verificationRequestService.js';
+import { listAccessRequestTypes as getAccessRequestTypeOptions } from '../services/accessRequestTypesService.js';
 
 function mapInvitation(invitation) {
   return {
-    id: invitation._id,
+    id: invitation._id || invitation.id,
+    invitationId: invitation._id || invitation.id,
     companyId: invitation.companyId,
     employeeId: invitation.employeeId,
+    employeeName: invitation.employeeName,
     employeeEmail: invitation.employeeEmail,
     employeeMobile: invitation.employeeMobile,
     employeeVeriworkId: invitation.employeeVeriworkId,
@@ -13,6 +16,12 @@ function mapInvitation(invitation) {
     designation: invitation.designation,
     status: invitation.status,
     invitedAt: invitation.invitedAt,
+    caseType: invitation.caseType,
+    emailSent: invitation.emailSent ?? false,
+    emailMock: invitation.emailMock ?? false,
+    registrationLink: invitation.registrationLink || null,
+    joinLink: invitation.joinLink || null,
+    dashboardStatus: invitation.dashboardStatus,
   };
 }
 
@@ -35,6 +44,34 @@ export async function getDepartmentTeam(req, res) {
 export async function getEmployeeProfile(req, res) {
   const data = await companyLinkingService.getEmployeeProfilePreview(req.user, req.params.employeeId);
   res.json({ success: true, data });
+}
+
+export async function getEmployeeById(req, res) {
+  const data = await companyLinkingService.getEmployeeProfilePreview(req.user, req.params.employeeId);
+  res.json({ success: true, data });
+}
+
+export async function revokeEmployeeAccess(req, res) {
+  const data = await companyLinkingService.revokeEmployeeAccess(
+    req.user,
+    req.params.employeeId,
+    req.body,
+  );
+  res.json({ success: true, data });
+}
+
+export async function getEmployeeDocuments(req, res) {
+  const data = await companyLinkingService.getEmployeeDocuments(req.user, req.params.employeeId);
+  res.json({ success: true, data });
+}
+
+export async function getEmployeeAccessStatus(req, res) {
+  const data = await companyLinkingService.getEmployeeAccessStatus(req.user, req.params.employeeId);
+  res.json({ success: true, data });
+}
+
+export async function listAccessRequestTypes(req, res) {
+  res.json({ success: true, data: getAccessRequestTypeOptions() });
 }
 
 export async function createAccessRequest(req, res) {
@@ -79,6 +116,11 @@ export async function approveVerificationRequest(req, res) {
 
 export async function rejectVerificationRequest(req, res) {
   const data = await verificationRequestService.rejectVerificationRequest(req.user, req.params.id);
+  res.json({ success: true, data });
+}
+
+export async function listPendingInvitations(req, res) {
+  const data = await companyLinkingService.listPendingInvitations(req.user);
   res.json({ success: true, data });
 }
 

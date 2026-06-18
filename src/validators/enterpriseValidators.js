@@ -53,6 +53,11 @@ export const accessRequestsQuerySchema = z.object({
 
 export const createAccessRequestSchema = z.object({
   employeeUserId: z.string().min(1),
-  requestType: z.enum(['profile_access', 'background_check', 'verification_data']).optional(),
+  requestType: z.enum([
+    'profile_access',
+    'background_check',
+    'verification_data',
+    'full_profile_access',
+  ]).optional(),
   message: z.string().max(500).optional(),
 });

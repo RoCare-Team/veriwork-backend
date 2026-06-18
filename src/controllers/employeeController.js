@@ -4,6 +4,7 @@ import * as jobService from '../services/jobService.js';
 import * as activityService from '../services/activityService.js';
 import * as vaultService from '../services/vaultService.js';
 import * as employeeLinkingService from '../services/employeeLinkingService.js';
+import * as endorsementService from '../services/endorsementService.js';
 import { storeUploadedFile } from '../utils/fileUpload.js';
 export async function getProfile(req, res) {
   const profile = await profileService.getEmployeeProfile(req.user._id);
@@ -31,6 +32,16 @@ export async function setupProfile(req, res) {
 export async function getScore(req, res) {
   const score = await profileService.getEmployeeScore(req.user._id);
   res.json({ success: true, data: score });
+}
+
+export async function listEndorsements(req, res) {
+  const data = await endorsementService.listEmployeeEndorsements(req.user._id);
+  res.json({ success: true, data });
+}
+
+export async function endorseEmployee(req, res) {
+  const data = await endorsementService.endorseEmployee(req.user._id, req.body);
+  res.status(201).json({ success: true, data });
 }
 
 export async function getVerificationStatus(req, res) {
