@@ -19,6 +19,34 @@ function maskPhone(phone = '') {
   return `+${digits.slice(0, 2)}******${digits.slice(-4)}`;
 }
 
+function maskEmail(email = '') {
+  const trimmed = email.trim();
+  if (!trimmed.includes('@')) return '';
+  const [local, domain] = trimmed.split('@');
+  if (!local || !domain) return '';
+  const visible = local.slice(0, Math.min(2, local.length));
+  return `${visible}${'*'.repeat(Math.max(1, local.length - visible.length))}@${domain}`;
+}
+
+async function findPublicProfile(slug) {
+  const identity = decodeURIComponent(String(slug || '').trim());
+  if (!identity) throw ApiError.badRequest('Profile identifier is required');
+
+  const profile = await EmployeeProfile.findOne({
+    $or: [{ publicSlug: identity }, { veriworkId: identity }],
+  });
+
+  if (!profile) throw ApiError.notFound('Profile not found');
+  if (profile.publicProfileEnabled === false) {
+    throw ApiError.notFound('This profile is not publicly available');
+  }
+  if (!profile.profileSetupComplete) {
+    throw ApiError.notFound('This profile is not ready to be shared yet');
+  }
+
+  return profile;
+}
+
 function formatPublicJob(job) {
   const tag = getJobVerificationTag(job);
   return {
