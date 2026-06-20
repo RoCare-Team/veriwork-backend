@@ -27,6 +27,7 @@ const employeeProfileSchema = new mongoose.Schema(
     skills: [{ type: String }],
     profileSetupComplete: { type: Boolean, default: false },
     aadhaarVerified: { type: Boolean, default: false },
+    panVerified: { type: Boolean, default: false },
     biometricVerified: { type: Boolean, default: false },
     digilockerUsed: { type: Boolean, default: false },
     photoUrl: { type: String, default: null },

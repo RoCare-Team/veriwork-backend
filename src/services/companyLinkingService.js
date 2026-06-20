@@ -9,6 +9,7 @@ import { EmployeeProfile } from '../models/EmployeeProfile.js';
 import { JobExperience } from '../models/JobExperience.js';
 import { VaultItem } from '../models/VaultItem.js';
 import { VerificationRequest } from '../models/VerificationRequest.js';
+import { User } from '../models/User.js';
 import { ApiError } from '../utils/ApiError.js';
 import { assertValidObjectId } from '../utils/objectId.js';
 import {
@@ -32,6 +33,15 @@ import {
   sendInvitationNotifications,
   buildEmployeeJoinLink,
 } from './invitationService.js';
+import { env } from '../config/env.js';
+import { sendAccessRequestEmail } from './emailService.js';
+import { getJobVerificationTag, computeProfileVerificationTags } from './verificationTagsService.js';
+import { COMPLETED_VERIFIED_STATUSES } from '../utils/verificationStatusUtils.js';
+import { listWorkforceQueues } from './workforceOnboardingService.js';
+import {
+  findPreviousCompanyByName,
+  buildPermanentVerificationRecord,
+} from './employmentVerificationService.js';
 
 function requireCompanyId(user) {
   if (!user.companyId) throw ApiError.forbidden('No company associated with this account');
@@ -223,9 +233,16 @@ async function buildTeamEmployeeCard(companyId, link) {
     role: link.designation || profile?.role || '',
     designation: link.designation || profile?.role || '',
     trustScore,
-    trustScoreMax: 900,
+    trustScoreMax: 1000,
     employmentStatus: link.employmentStatus,
-    statusLabel: link.employmentStatus === 'active' ? 'ACTIVE' : link.employmentStatus.toUpperCase(),
+    onboardingStage: link.onboardingStage || 'incoming',
+    statusLabel: link.onboardingStage === 'active'
+      ? 'ACTIVE'
+      : link.onboardingStage === 'verified'
+        ? 'VERIFIED'
+        : link.onboardingStage === 'pending_verification'
+          ? 'PENDING VERIFICATION'
+          : 'INCOMING',
     department: link.department || 'Unassigned',
     photoUrl: profile?.photoUrl || '',
     veriworkId: profile?.veriworkId || null,
@@ -250,7 +267,7 @@ async function buildTeamEmployeeCard(companyId, link) {
 }
 
 async function buildTeamEmployees(companyId, department = null) {
-  const filter = { companyId };
+  const filter = { companyId, employmentStatus: 'active' };
   if (department) filter.department = department;
 
   const links = await CompanyEmployee.find(filter).sort({ createdAt: -1 });
@@ -282,6 +299,41 @@ export async function getCompanyTeam(user) {
     departments,
     employees,
     totalEmployees: employees.length,
+    workforceQueues: await listWorkforceQueues(companyId),
+  };
+}
+
+export async function getCompanyWorkspace(user) {
+  const companyId = requireCompanyId(user);
+  const company = await Company.findById(companyId);
+  if (!company) throw ApiError.notFound('Company not found');
+
+  const [teamCount, adminUser] = await Promise.all([
+    CompanyEmployee.countDocuments({ companyId, employmentStatus: 'active' }),
+    User.findById(user._id).select('email role'),
+  ]);
+
+  return {
+    id: company._id,
+    name: company.name,
+    industry: company.industry || '',
+    companySize: company.companySize || '',
+    workEmail: company.workEmail,
+    contactName: company.contactName || '',
+    phone: company.phone || '',
+    country: company.country || '',
+    city: company.city || '',
+    isVerified: company.isVerified,
+    onboardingComplete: company.onboardingComplete,
+    totalEmployees: teamCount,
+    admin: adminUser
+      ? {
+          id: adminUser._id,
+          email: adminUser.email,
+          role: adminUser.role,
+          name: company.contactName || adminUser.email?.split('@')[0] || 'Admin',
+        }
+      : null,
   };
 }
 
@@ -314,6 +366,16 @@ export async function createCompanyAccessRequest(user, payload) {
   const company = await Company.findById(companyId).select('name');
   const requestType = payload.requestType || ACCESS_TYPES.PROFILE;
 
+  const previousJob = await JobExperience.findOne({ userId: payload.employeeId })
+    .sort({ isPresent: -1, createdAt: -1 });
+  const previousEmployerName = previousJob?.company || '';
+
+  const defaultMessage = getAccessRequestMessage(
+    company?.name || 'A company',
+    requestType,
+    previousEmployerName,
+  );
+
   const accessRequest = await AccessRequest.create({
     companyId,
     requestedBy: user._id,
@@ -321,27 +383,43 @@ export async function createCompanyAccessRequest(user, payload) {
     employeeUserId: payload.employeeId,
     employeeName: profile?.name || '',
     requestType,
-    message: payload.message || '',
+    message: payload.message?.trim() || defaultMessage,
     status: 'pending',
     requestedAt: new Date(),
     metadata: {
       consentScope: getConsentScope(requestType),
+      previousEmployerName,
     },
   });
+
+  const activityMessage = payload.message?.trim() || defaultMessage;
 
   await ActivityLog.create({
     userId: payload.employeeId,
     type: 'access_request',
     title: getAccessRequestTitle(requestType),
-    message: payload.message?.trim()
-      || getAccessRequestMessage(company?.name || 'A company', requestType),
+    message: activityMessage,
     company: company?.name || '',
     status: 'pending',
     metadata: {
       accessRequestId: accessRequest._id.toString(),
       requestType,
+      previousEmployerName,
     },
   });
+
+  const employeeEmail = profile?.email;
+  if (employeeEmail) {
+    await sendAccessRequestEmail({
+      to: employeeEmail,
+      employeeName: profile?.name || 'Employee',
+      companyName: company?.name || 'A company',
+      requestType,
+      previousEmployerName,
+      message: activityMessage,
+      reviewLink: `${env.frontendUrl}/employee/access-requests`,
+    });
+  }
 
   await createCompanyAuditLog({
     companyId,
@@ -470,8 +548,8 @@ export async function getCompanyInsights(user) {
     },
     verificationAnalytics: {
       totalRequests: verificationRequests.length,
-      approved: verificationRequests.filter((r) => r.status === 'approved').length,
-      pending: verificationRequests.filter((r) => ['pending', 'in_process'].includes(r.status)).length,
+      approved: verificationRequests.filter((r) => COMPLETED_VERIFIED_STATUSES.includes(r.status)).length,
+      pending: verificationRequests.filter((r) => ['pending', 'in_process', 'in_review', 'hr_responded'].includes(r.status)).length,
       rejected: verificationRequests.filter((r) => r.status === 'rejected').length,
     },
     workforceGrowth,
@@ -500,27 +578,157 @@ async function hasApprovedAccess(companyId, employeeId, requestType = null) {
   return Boolean(approved);
 }
 
-function buildEmploymentHistory(jobs) {
-  return jobs.map((job) => ({
-    id: job._id,
-    title: job.title,
-    company: job.company,
-    employmentType: job.employmentType,
-    joiningDate: job.joiningDate,
-    exitDate: job.exitDate,
-    isPresent: job.isPresent,
-    status: job.status,
-    duration: job.duration,
-    salaryBand: job.salaryBand,
+function mapVerificationLevelMeta(level) {
+  const map = {
+    employer_verified: {
+      label: 'Employer Verified',
+      tier: 5,
+      color: 'indigo',
+      description: 'Previous company confirmed directly on PagerLook',
+      verifiedBy: 'Employer platform',
+    },
+    hr_verified: {
+      label: 'HR Verified',
+      tier: 4,
+      color: 'blue',
+      description: 'HR email confirmation received and approved',
+      verifiedBy: 'HR email',
+    },
+    document_verified: {
+      label: 'Document Verified',
+      tier: 3,
+      color: 'emerald',
+      description: 'Verified using uploaded employment documents',
+      verifiedBy: 'Document review',
+    },
+    none: {
+      label: 'Not Verified',
+      tier: 0,
+      color: 'slate',
+      description: 'Employment not yet verified',
+      verifiedBy: null,
+    },
+  };
+  return map[level] || map.none;
+}
+
+async function buildEmploymentHistory(jobs, employeeId, { includeDocuments = false, requestingCompanyId = null } = {}) {
+  const jobIds = jobs.map((j) => j._id);
+
+  const [documents, verificationRequests, platformChecks] = await Promise.all([
+    includeDocuments
+      ? Document.find({ userId: employeeId, jobId: { $in: jobIds } }).sort({ createdAt: -1 })
+      : Promise.resolve([]),
+    VerificationRequest.find({ employeeId, jobExperienceId: { $in: jobIds } })
+      .sort({ createdAt: -1 }),
+    Promise.all(
+      jobs.map(async (job) => {
+        const prev = await findPreviousCompanyByName(job.company, requestingCompanyId);
+        return [job._id.toString(), prev ? { id: prev._id.toString(), name: prev.name } : null];
+      }),
+    ),
+  ]);
+
+  const docsByJob = documents.reduce((acc, doc) => {
+    const key = doc.jobId?.toString();
+    if (!key) return acc;
+    if (!acc[key]) acc[key] = [];
+    acc[key].push({
+      id: doc._id,
+      documentType: doc.documentType || 'other',
+      originalName: doc.originalName || doc.fileName,
+      status: doc.status,
+      url: doc.url,
+      uploadedAt: doc.createdAt,
+    });
+    return acc;
+  }, {});
+
+  const requestsByJob = verificationRequests.reduce((acc, req) => {
+    const key = req.jobExperienceId?.toString();
+    if (!key) return acc;
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(req);
+    return acc;
+  }, {});
+
+  const platformMap = Object.fromEntries(
+    platformChecks.map(([jobId, match]) => [jobId, match]),
+  );
+
+  return Promise.all(jobs.map(async (job) => {
+    const jobId = job._id.toString();
+    const platformMatch = platformMap[jobId] || null;
+    const onPlatform = Boolean(platformMatch);
+    const tag = getJobVerificationTag(job);
+    const levelMeta = mapVerificationLevelMeta(job.verificationLevel || 'none');
+    const jobRequests = requestsByJob[jobId] || [];
+    const latestRequest = jobRequests[0] || null;
+    const approvedRequest = jobRequests.find((r) => COMPLETED_VERIFIED_STATUSES.includes(r.status)
+      && r.verificationResult === 'verified') || null;
+    const permanentRecord = ['document_verified', 'hr_verified', 'employer_verified'].includes(job.verificationLevel)
+      ? buildPermanentVerificationRecord(job, approvedRequest)
+      : null;
+
+    return {
+      id: job._id,
+      title: job.title,
+      company: job.company,
+      employmentType: job.employmentType || 'Full-time',
+      joiningDate: job.joiningDate,
+      exitDate: job.exitDate,
+      startDate: job.joiningDate,
+      endDate: job.exitDate,
+      isPresent: job.isPresent,
+      duration: job.duration,
+      salaryBand: job.salaryBand,
+      description: job.description || '',
+      status: job.status,
+      verificationLevel: job.verificationLevel || 'none',
+      verificationTag: tag,
+      verificationMeta: levelMeta,
+      isReusable: permanentRecord?.isReusable || false,
+      confidenceScore: job.confidenceScore,
+      verifiedAt: job.verifiedAt,
+      verificationFeedback: job.verificationFeedback || approvedRequest?.employmentDetails?.feedback || '',
+      rehireEligible: job.rehireEligible ?? approvedRequest?.employmentDetails?.rehireEligible ?? null,
+      verificationNotes: job.verificationNotes || approvedRequest?.employmentDetails?.verificationNotes || '',
+      hrEmail: job.hrEmail,
+      managerEmail: job.managerEmail,
+      previousCompanyOnPlatform: onPlatform,
+      matchedPlatformCompany: platformMatch,
+      verificationChannel: latestRequest?.verificationChannel || (onPlatform ? 'platform' : 'email'),
+      verificationPath: onPlatform ? 'platform' : 'email',
+      resolvedVia: approvedRequest?.resolvedVia || latestRequest?.resolvedVia || null,
+      permanentRecord,
+      documents: docsByJob[jobId] || [],
+      documentCount: (docsByJob[jobId] || []).length,
+      latestVerificationRequest: latestRequest
+        ? {
+            id: latestRequest._id,
+            status: latestRequest.status,
+            verificationChannel: latestRequest.verificationChannel,
+            verificationLevel: latestRequest.verificationLevel,
+            requestedAt: latestRequest.requestedAt || latestRequest.createdAt,
+            respondedAt: latestRequest.respondedAt,
+            employmentDetails: latestRequest.employmentDetails || {},
+          }
+        : null,
+    };
   }));
 }
 
 function buildVerificationSection(profile, jobs, trustScore) {
   const scoreFactors = profile ? getScoreFactors(profile, jobs) : [];
+  const hierarchy = profile ? computeProfileVerificationTags(profile, jobs) : { tags: [], highestLevel: 'none' };
+
   return {
     trustScore,
     scoreRating: getScoreRating(trustScore),
     scoreFactors,
+    verificationHierarchy: hierarchy,
+    verificationTags: hierarchy.tags,
+    highestVerificationLevel: hierarchy.highestLevel,
     verificationStatus: {
       profileSetupComplete: profile?.profileSetupComplete || false,
       aadhaarVerified: profile?.aadhaarVerified || false,
@@ -530,8 +738,16 @@ function buildVerificationSection(profile, jobs, trustScore) {
       verificationPercent: profile ? getVerificationPercent(profile) : 0,
       isComplete: profile ? isVerificationComplete(profile) : false,
     },
-    verifiedJobsCount: jobs.filter((j) => j.status === 'verified').length,
+    verifiedJobsCount: jobs.filter((j) => j.status === 'verified' || j.verificationLevel !== 'none').length,
     totalJobsCount: jobs.length,
+    jobs: jobs.map((job) => ({
+      id: job._id,
+      company: job.company,
+      title: job.title,
+      verificationTag: getJobVerificationTag(job),
+      verificationLevel: job.verificationLevel,
+      isReusable: ['document_verified', 'hr_verified', 'employer_verified'].includes(job.verificationLevel),
+    })),
   };
 }
 
@@ -583,6 +799,7 @@ export async function getEmployeeProfilePreview(user, employeeId) {
     department: link.department || 'Unassigned',
     trustScore,
     employmentStatus: link.employmentStatus,
+    onboardingStage: link.onboardingStage || 'incoming',
     veriworkId: profile?.veriworkId || null,
     isVerified: profile ? isVerificationComplete(profile) : false,
     joinedAt: link.joinedAt,
@@ -647,7 +864,10 @@ export async function getEmployeeProfilePreview(user, employeeId) {
 
   if (access.profileAccess) {
     response.profileSection = buildProfileDetails(profile, link);
-    response.employmentHistory = buildEmploymentHistory(jobs);
+    response.employmentHistory = await buildEmploymentHistory(jobs, validEmployeeId, {
+      includeDocuments: access.backgroundCheck,
+      requestingCompanyId: companyId,
+    });
   }
 
   if (access.backgroundCheck) {
@@ -732,6 +952,8 @@ export async function getEmployeeDocuments(user, employeeId) {
     const job = doc.jobId ? jobMap.get(doc.jobId.toString()) : null;
     return {
       id: doc._id,
+      jobId: doc.jobId,
+      documentType: doc.documentType || 'other',
       category: doc.category,
       fileName: doc.originalName || doc.fileName,
       url: doc.url,

@@ -8,7 +8,10 @@ import {
   auditLogsQuerySchema,
   companyAccessRequestSchema,
   createVerificationRequestSchema,
+  approveVerificationRequestSchema,
+  reviewHrResponseSchema,
   emailVerificationCompleteSchema,
+  assignEmployeeOnboardingSchema,
   inviteEmployeeSchema,
   revokeAccessSchema,
 } from '../validators/companyValidators.js';
@@ -22,12 +25,19 @@ router.post('/invite-employee', validate(inviteEmployeeSchema), asyncHandler(com
 router.get('/invitations/pending', asyncHandler(companyController.listPendingInvitations));
 
 // 2. Workforce management
+router.get('/workspace', asyncHandler(companyController.getWorkspace));
 router.get('/team', asyncHandler(companyController.getTeam));
 router.get('/team/:department', asyncHandler(companyController.getDepartmentTeam));
+router.get('/platform-companies/search', asyncHandler(companyController.searchRegisteredCompanies));
 router.get('/employees/:employeeId', asyncHandler(companyController.getEmployeeById));
 router.get('/employees/:employeeId/profile', asyncHandler(companyController.getEmployeeProfile));
 router.get('/employees/:employeeId/documents', asyncHandler(companyController.getEmployeeDocuments));
 router.get('/employees/:employeeId/access-status', asyncHandler(companyController.getEmployeeAccessStatus));
+router.patch(
+  '/employees/:employeeId/onboarding',
+  validate(assignEmployeeOnboardingSchema),
+  asyncHandler(companyController.assignEmployeeOnboarding),
+);
 router.post(
   '/employees/:employeeId/revoke-access',
   validate(revokeAccessSchema),
@@ -47,8 +57,25 @@ router.post(
 );
 router.get('/verification-requests/outgoing', asyncHandler(companyController.listOutgoingVerificationRequests));
 router.get('/verification-requests/incoming', asyncHandler(companyController.listIncomingVerificationRequests));
-router.post('/verification-requests/:id/approve', asyncHandler(companyController.approveVerificationRequest));
+router.post(
+  '/verification-requests/:id/approve',
+  validate(approveVerificationRequestSchema),
+  asyncHandler(companyController.approveVerificationRequest),
+);
 router.post('/verification-requests/:id/reject', asyncHandler(companyController.rejectVerificationRequest));
+router.post(
+  '/verification-requests/:id/review-hr-response',
+  validate(reviewHrResponseSchema),
+  asyncHandler(companyController.reviewHrResponse),
+);
+router.post(
+  '/verification-requests/:id/confirm-document-verification',
+  asyncHandler(companyController.confirmDocumentVerification),
+);
+router.get(
+  '/employees/:employeeId/jobs/:jobId/verification-record',
+  asyncHandler(companyController.getEmployeeJobVerificationRecord),
+);
 router.post(
   '/verification-requests/:id/complete-email',
   validate(emailVerificationCompleteSchema),

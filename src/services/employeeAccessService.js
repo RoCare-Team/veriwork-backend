@@ -137,9 +137,12 @@ export function getAccessRequestTitle(requestType) {
   }
 }
 
-export function getAccessRequestMessage(companyName, requestType) {
+export function getAccessRequestMessage(companyName, requestType, previousEmployerName = '') {
   switch (requestType) {
     case ACCESS_TYPES.FULL_PROFILE:
+      if (previousEmployerName) {
+        return `${companyName} is requesting access to your employment records, verification history, and documents from ${previousEmployerName}.`;
+      }
       return `${companyName} requested full access to your profile, documents, and verification records`;
     case ACCESS_TYPES.BACKGROUND:
       return `${companyName} requested access to your documents and background records`;

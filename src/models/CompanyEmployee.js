@@ -14,8 +14,20 @@ const companyEmployeeSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    employeeName: { type: String, default: '' },
     department: { type: String, default: '' },
     designation: { type: String, default: '' },
+    reportingManagerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    onboardingStage: {
+      type: String,
+      enum: ['incoming', 'pending_verification', 'verified', 'active'],
+      default: 'incoming',
+      index: true,
+    },
     employmentStatus: {
       type: String,
       enum: ['active', 'inactive'],
@@ -23,6 +35,7 @@ const companyEmployeeSchema = new mongoose.Schema(
       index: true,
     },
     joinedAt: { type: Date, default: Date.now },
+    verifiedAt: { type: Date, default: null },
   },
   { timestamps: true },
 );

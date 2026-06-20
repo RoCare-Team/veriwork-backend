@@ -14,6 +14,7 @@ import {
   createVaultItemSchema,
   activityQuerySchema,
   updateSettingsSchema,
+  jobVerificationRequestSchema,
 } from '../validators/employeeValidators.js';
 import * as employeeController from '../controllers/employeeController.js';
 
@@ -60,6 +61,16 @@ router.post(
   upload.single('document'),
   asyncHandler(employeeController.uploadJobDocument),
 );
+router.post(
+  '/jobs/:id/verification-request',
+  validate(jobVerificationRequestSchema),
+  asyncHandler(employeeController.createJobVerificationRequest),
+);
+router.get('/jobs/:id/verification', asyncHandler(employeeController.getJobVerification));
+router.get('/verification/requests', asyncHandler(employeeController.listVerificationRequests));
+router.post('/verification-requests/:id/approve-consent', asyncHandler(employeeController.approveVerificationConsent));
+router.post('/verification-requests/:id/reject-consent', asyncHandler(employeeController.rejectVerificationConsent));
+router.get('/verification/tags', asyncHandler(employeeController.getVerificationTags));
 
 router.get(
   '/activity',

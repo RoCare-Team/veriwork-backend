@@ -1,29 +1,50 @@
+import { VERIFICATION_LEVEL_WEIGHTS } from './verificationTagsService.js';
+
 export const SCORE_MIN = 300;
-export const SCORE_MAX = 900;
+export const SCORE_MAX = 1000;
+
+const JOB_LEVEL_POINTS = {
+  document_verified: 80,
+  hr_verified: 130,
+  employer_verified: 180,
+};
+
+function getJobVerificationPoints(job) {
+  if (!job) return 0;
+  if (job.verificationLevel && JOB_LEVEL_POINTS[job.verificationLevel]) {
+    return JOB_LEVEL_POINTS[job.verificationLevel];
+  }
+  if (job.status === 'verified') return JOB_LEVEL_POINTS.document_verified;
+  if (job.status === 'in_process') return 20;
+  return 0;
+}
 
 export function calculateEmployeeScore(profile, jobs = []) {
   if (!profile) return SCORE_MIN;
 
   let score = SCORE_MIN;
 
-  if (profile.profileSetupComplete) score += 50;
-  if (profile.aadhaarVerified) score += 120;
-  if (profile.biometricVerified) score += 130;
-  if (profile.digilockerUsed) score += 25;
+  if (profile.profileSetupComplete) {
+    score += VERIFICATION_LEVEL_WEIGHTS.profile_verified;
+  }
 
-  const verifiedJobs = jobs.filter((j) => j.status === 'verified').length;
-  const pendingJobs = jobs.filter((j) => j.status === 'in_process').length;
+  const identityVerified = profile.aadhaarVerified && profile.biometricVerified;
+  if (identityVerified) {
+    score += VERIFICATION_LEVEL_WEIGHTS.identity_verified;
+    if (profile.digilockerUsed) score += 25;
+  }
 
-  score += verifiedJobs * 45;
-  score += pendingJobs * 12;
-  score += Math.min(jobs.length * 8, 40);
+  for (const job of jobs) {
+    score += getJobVerificationPoints(job);
+  }
+
   score += Math.min((profile.endorsements || 0) * 8, 60);
 
   return Math.min(SCORE_MAX, Math.max(SCORE_MIN, Math.round(score)));
 }
 
 export function getScoreRating(score) {
-  if (score >= 800) {
+  if (score >= 850) {
     return {
       label: 'Excellent',
       tier: 'A+',
@@ -34,21 +55,21 @@ export function getScoreRating(score) {
     return {
       label: 'Good',
       tier: 'A',
-      description: 'Strong identity and work history. Reliable for hiring decisions.',
+      description: 'Strong identity and employment verification. Reliable for hiring.',
     };
   }
-  if (score >= 600) {
+  if (score >= 550) {
     return {
       label: 'Fair',
       tier: 'B',
       description: 'Building trust. Complete verification and job records to improve.',
     };
   }
-  if (score >= 450) {
+  if (score >= 400) {
     return {
       label: 'Developing',
       tier: 'C',
-      description: 'Early stage profile. Finish identity verification to unlock score.',
+      description: 'Early stage profile. Finish identity and employment verification.',
     };
   }
   return {
@@ -59,41 +80,36 @@ export function getScoreRating(score) {
 }
 
 export function getScoreFactors(profile, jobs = []) {
-  const verifiedJobs = jobs.filter((j) => j.status === 'verified').length;
-  const pendingJobs = jobs.filter((j) => j.status === 'in_process').length;
+  const identityVerified = profile?.aadhaarVerified && profile?.biometricVerified;
+  const verifiedJobs = jobs.filter((j) => j.status === 'verified' || j.verificationLevel !== 'none').length;
+  const jobPoints = jobs.reduce((sum, j) => sum + getJobVerificationPoints(j), 0);
 
   return [
     {
       id: 'profile',
-      label: 'Profile completeness',
-      points: profile?.profileSetupComplete ? 50 : 0,
-      max: 50,
-      tip: 'Add your name and professional role',
+      label: 'Profile verified',
+      points: profile?.profileSetupComplete ? VERIFICATION_LEVEL_WEIGHTS.profile_verified : 0,
+      max: VERIFICATION_LEVEL_WEIGHTS.profile_verified,
+      tip: 'Complete your profile setup',
       done: Boolean(profile?.profileSetupComplete),
     },
     {
-      id: 'aadhaar',
-      label: 'Aadhaar verification',
-      points: profile?.aadhaarVerified ? 120 + (profile.digilockerUsed ? 25 : 0) : 0,
-      max: 145,
-      tip: 'Verify via DigiLocker for maximum points',
-      done: Boolean(profile?.aadhaarVerified),
+      id: 'identity',
+      label: 'Identity verified',
+      points: identityVerified
+        ? VERIFICATION_LEVEL_WEIGHTS.identity_verified + (profile.digilockerUsed ? 25 : 0)
+        : 0,
+      max: VERIFICATION_LEVEL_WEIGHTS.identity_verified + 25,
+      tip: 'Verify Aadhaar + biometric liveness',
+      done: identityVerified,
     },
     {
-      id: 'biometric',
-      label: 'Biometric liveness',
-      points: profile?.biometricVerified ? 130 : 0,
-      max: 130,
-      tip: 'Complete face match with your ID photo',
-      done: Boolean(profile?.biometricVerified),
-    },
-    {
-      id: 'jobs',
-      label: 'Employment records',
-      points: verifiedJobs * 45 + pendingJobs * 12 + Math.min(jobs.length * 8, 40),
-      max: 200,
-      tip: 'Add and verify job history to boost score',
-      done: jobs.length > 0,
+      id: 'employment',
+      label: 'Employment verification',
+      points: jobPoints,
+      max: 360,
+      tip: 'Verify jobs — Document → HR → Employer verified tiers',
+      done: verifiedJobs > 0,
     },
     {
       id: 'endorsements',
@@ -107,19 +123,20 @@ export function getScoreFactors(profile, jobs = []) {
 }
 
 export function getScorePercentile(score) {
-  if (score >= 800) return 'Top 5% of professionals';
+  if (score >= 850) return 'Top 5% of professionals';
   if (score >= 700) return 'Top 20% of professionals';
-  if (score >= 600) return 'Top 45% of professionals';
-  if (score >= 450) return 'Building your ranking';
+  if (score >= 550) return 'Top 45% of professionals';
+  if (score >= 400) return 'Building your ranking';
   return 'Not yet ranked';
 }
 
 export function getVerificationPercent(profile) {
   let percent = 0;
-  if (profile.profileSetupComplete) percent += 33;
-  if (profile.aadhaarVerified) percent += 33;
-  if (profile.biometricVerified) percent += 34;
-  return percent;
+  if (profile.profileSetupComplete) percent += 25;
+  if (profile.aadhaarVerified) percent += 25;
+  if (profile.biometricVerified) percent += 25;
+  if (profile.panVerified) percent += 25;
+  return Math.min(100, percent);
 }
 
 export function isVerificationComplete(profile) {

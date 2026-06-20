@@ -10,9 +10,11 @@ import {
   getVerificationPercent,
   isVerificationComplete,
 } from './scoreService.js';
+import { computeProfileVerificationTags } from './verificationTagsService.js';
 import { ApiError } from '../utils/ApiError.js';
 import { storeUploadedFile } from '../utils/fileUpload.js';
 import { autoJoinAfterProfileSetup } from './invitationService.js';
+import { buildPublicProfileUrl } from '../utils/publicProfileUrl.js';
 
 export async function getOrCreateEmployeeUser(phone) {
   const normalized = normalizePhone(phone);
@@ -120,7 +122,7 @@ export function buildProfileResponse(profile, jobs = []) {
     photoUrl: profile.photoUrl,
     veriworkId: profile.veriworkId,
     publicSlug: profile.publicSlug,
-    publicProfileUrl: `veriwork.app/u/${profile.publicSlug}`,
+    publicProfileUrl: buildPublicProfileUrl(profile),
     endorsements: profile.endorsements || 0,
     verifiedJobsCount,
     totalJobsCount: jobs.length,
@@ -322,6 +324,7 @@ export async function getEmployeeScore(userId) {
   const jobs = await getJobsForUser(userId);
   const score = calculateEmployeeScore(profile, jobs);
   const factors = getScoreFactors(profile, jobs);
+  const hierarchy = computeProfileVerificationTags(profile, jobs);
   const endorsementFactor = factors.find((f) => f.id === 'endorsements');
 
   return {
@@ -329,10 +332,13 @@ export async function getEmployeeScore(userId) {
     veriScore: score,
     trustScore: score,
     minScore: 300,
-    maxScore: 900,
+    maxScore: 1000,
     scoreRating: getScoreRating(score),
     percentile: getScorePercentile(score),
     factors,
+    verificationHierarchy: hierarchy,
+    verificationTags: hierarchy.tags,
+    highestVerificationLevel: hierarchy.highestLevel,
     endorsements: {
       count: profile.endorsements || 0,
       maxCount: 8,

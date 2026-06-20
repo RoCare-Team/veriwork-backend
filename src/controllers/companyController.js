@@ -1,5 +1,7 @@
 import * as companyLinkingService from '../services/companyLinkingService.js';
 import * as verificationRequestService from '../services/verificationRequestService.js';
+import * as workforceOnboardingService from '../services/workforceOnboardingService.js';
+import { searchPlatformCompanies } from '../services/employmentVerificationService.js';
 import { listAccessRequestTypes as getAccessRequestTypeOptions } from '../services/accessRequestTypesService.js';
 
 function mapInvitation(invitation) {
@@ -32,6 +34,11 @@ export async function inviteEmployee(req, res) {
 
 export async function getTeam(req, res) {
   const data = await companyLinkingService.getCompanyTeam(req.user);
+  res.json({ success: true, data });
+}
+
+export async function getWorkspace(req, res) {
+  const data = await companyLinkingService.getCompanyWorkspace(req.user);
   res.json({ success: true, data });
 }
 
@@ -99,6 +106,12 @@ export async function createVerificationRequest(req, res) {
   res.status(201).json({ success: true, data });
 }
 
+export async function searchRegisteredCompanies(req, res) {
+  const q = req.query.q || '';
+  const companies = await searchPlatformCompanies(q, req.user.companyId);
+  res.json({ success: true, data: { companies } });
+}
+
 export async function listOutgoingVerificationRequests(req, res) {
   const data = await verificationRequestService.listOutgoingVerificationRequests(req.user);
   res.json({ success: true, data });
@@ -110,12 +123,43 @@ export async function listIncomingVerificationRequests(req, res) {
 }
 
 export async function approveVerificationRequest(req, res) {
-  const data = await verificationRequestService.approveVerificationRequest(req.user, req.params.id);
+  const data = await verificationRequestService.approveVerificationRequest(
+    req.user,
+    req.params.id,
+    req.body,
+  );
   res.json({ success: true, data });
 }
 
 export async function rejectVerificationRequest(req, res) {
-  const data = await verificationRequestService.rejectVerificationRequest(req.user, req.params.id);
+  const data = await verificationRequestService.rejectVerificationRequest(
+    req.user,
+    req.params.id,
+    req.body,
+  );
+  res.json({ success: true, data });
+}
+
+export async function reviewHrResponse(req, res) {
+  const data = await verificationRequestService.reviewHrResponse(req.user, req.params.id, req.body);
+  res.json({ success: true, data });
+}
+
+export async function confirmDocumentVerification(req, res) {
+  const data = await verificationRequestService.confirmDocumentVerification(
+    req.user,
+    req.params.id,
+    req.body,
+  );
+  res.json({ success: true, data });
+}
+
+export async function getEmployeeJobVerificationRecord(req, res) {
+  const data = await verificationRequestService.getEmployeeJobVerificationRecord(
+    req.user,
+    req.params.employeeId,
+    req.params.jobId,
+  );
   res.json({ success: true, data });
 }
 
@@ -126,5 +170,14 @@ export async function listPendingInvitations(req, res) {
 
 export async function completeEmailVerification(req, res) {
   const data = await verificationRequestService.completeEmailVerification(req.user, req.params.id, req.body);
+  res.json({ success: true, data });
+}
+
+export async function assignEmployeeOnboarding(req, res) {
+  const data = await workforceOnboardingService.assignEmployeeOnboarding(
+    req.user,
+    req.params.employeeId,
+    req.body,
+  );
   res.json({ success: true, data });
 }

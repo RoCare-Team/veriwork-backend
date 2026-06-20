@@ -5,6 +5,7 @@ import * as activityService from '../services/activityService.js';
 import * as vaultService from '../services/vaultService.js';
 import * as employeeLinkingService from '../services/employeeLinkingService.js';
 import * as endorsementService from '../services/endorsementService.js';
+import * as verificationRequestService from '../services/verificationRequestService.js';
 import { storeUploadedFile } from '../utils/fileUpload.js';
 export async function getProfile(req, res) {
   const profile = await profileService.getEmployeeProfile(req.user._id);
@@ -71,7 +72,12 @@ export async function createJob(req, res) {
 }
 
 export async function uploadJobDocument(req, res) {
-  const doc = await jobService.addJobDocument(req.user._id, req.params.id, req.file);
+  const doc = await jobService.addJobDocument(
+    req.user._id,
+    req.params.id,
+    req.file,
+    { documentType: req.body?.documentType },
+  );
   res.status(201).json({ success: true, data: doc });
 }
 
@@ -145,5 +151,45 @@ export async function approveAccessRequest(req, res) {
 export async function rejectAccessRequest(req, res) {
   const requestId = req.params.id || req.params.requestId;
   const data = await employeeLinkingService.rejectEmployeeAccessRequest(req.user._id, requestId);
+  res.json({ success: true, data });
+}
+
+export async function createJobVerificationRequest(req, res) {
+  const data = await verificationRequestService.createEmployeeVerificationRequest(
+    req.user._id,
+    req.params.id,
+    req.body,
+  );
+  res.status(201).json({ success: true, data });
+}
+
+export async function getJobVerification(req, res) {
+  const data = await verificationRequestService.getJobVerificationStatus(req.user._id, req.params.id);
+  res.json({ success: true, data });
+}
+
+export async function listVerificationRequests(req, res) {
+  const data = await verificationRequestService.listEmployeeVerificationRequests(req.user._id);
+  res.json({ success: true, data });
+}
+
+export async function approveVerificationConsent(req, res) {
+  const requestId = req.params.id || req.params.requestId;
+  const data = await verificationRequestService.approveEmployeeVerificationConsent(req.user._id, requestId);
+  res.json({ success: true, data });
+}
+
+export async function rejectVerificationConsent(req, res) {
+  const requestId = req.params.id || req.params.requestId;
+  const data = await verificationRequestService.rejectEmployeeVerificationConsent(
+    req.user._id,
+    requestId,
+    req.body,
+  );
+  res.json({ success: true, data });
+}
+
+export async function getVerificationTags(req, res) {
+  const data = await verificationRequestService.getVerificationTags(req.user._id);
   res.json({ success: true, data });
 }

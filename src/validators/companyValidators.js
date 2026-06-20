@@ -31,12 +31,35 @@ export const companyAccessRequestSchema = z.object({
 export const createVerificationRequestSchema = z.object({
   employeeId: z.string().min(1),
   jobExperienceId: z.string().min(1),
+  targetCompanyId: z.string().optional(),
   hrEmail: z.string().email().optional(),
+  managerEmail: z.string().email().optional(),
   hrName: z.string().optional(),
 });
 
+export const approveVerificationRequestSchema = z.object({
+  workedHere: z.boolean().optional(),
+  designation: z.string().optional(),
+  joiningDate: z.string().optional(),
+  exitDate: z.string().optional(),
+  duration: z.string().optional(),
+  feedback: z.string().max(1000).optional(),
+  hrFeedback: z.string().max(1000).optional(),
+  rehireEligible: z.boolean().nullable().optional(),
+  verificationNotes: z.string().max(1000).optional(),
+  employmentType: z.string().optional(),
+  employmentStatus: z.string().optional(),
+  notes: z.string().max(500).optional(),
+});
+
+export const reviewHrResponseSchema = z.object({
+  approved: z.boolean(),
+  notes: z.string().max(500).optional(),
+});
+
 export const emailVerificationCompleteSchema = z.object({
-  verified: z.boolean(),
+  verified: z.boolean().optional(),
+  useDocuments: z.boolean().optional(),
   notes: z.string().max(500).optional(),
 });
 
@@ -53,4 +76,10 @@ export const auditLogsQuerySchema = z.object({
   action: z.string().optional(),
   page: z.coerce.number().int().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
+export const assignEmployeeOnboardingSchema = z.object({
+  department: z.string().min(1).optional(),
+  designation: z.string().min(1).optional(),
+  reportingManagerId: z.string().optional(),
 });

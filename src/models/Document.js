@@ -12,6 +12,11 @@ const documentSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'JobExperience',
     },
+    documentType: {
+      type: String,
+      enum: ['offer_letter', 'salary_slip', 'experience_letter', 'relieving_letter', 'other'],
+      default: 'other',
+    },
     category: {
       type: String,
       enum: ['identity', 'education', 'experience', 'financial', 'job', 'company', 'other'],

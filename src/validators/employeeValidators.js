@@ -89,8 +89,15 @@ export const createJobSchema = z.object({
   isPresent: z.boolean().optional(),
   duration: z.string().optional(),
   companyEmail: z.string().optional(),
-  hrEmail: z.string().optional(),
+  hrEmail: z.string().email().optional().or(z.literal('')),
+  managerEmail: z.string().email().optional().or(z.literal('')),
   description: z.string().optional(),
+});
+
+export const jobVerificationRequestSchema = z.object({
+  hrEmail: z.string().email().optional(),
+  managerEmail: z.string().email().optional(),
+  hrName: z.string().optional(),
 });
 
 export const activityActionSchema = z.object({

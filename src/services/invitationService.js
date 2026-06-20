@@ -43,9 +43,11 @@ export async function acceptInvitationInternal(invitation, userId) {
     {
       companyId: invitation.companyId,
       employeeId: userId,
+      employeeName: invitation.employeeName || '',
       department: invitation.department,
       designation: invitation.designation,
       employmentStatus: 'active',
+      onboardingStage: 'pending_verification',
       joinedAt: new Date(),
     },
     { upsert: true, new: true, setDefaultsOnInsert: true },

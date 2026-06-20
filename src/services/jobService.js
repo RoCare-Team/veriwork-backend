@@ -3,8 +3,12 @@ import { Document } from '../models/Document.js';
 import { ApiError } from '../utils/ApiError.js';
 import { storeUploadedFile } from '../utils/fileUpload.js';
 import { refreshCachedScore } from './employeeProfileService.js';
+import { getJobVerificationTag } from './verificationTagsService.js';
+
+const DOCUMENT_TYPES = ['offer_letter', 'salary_slip', 'experience_letter', 'relieving_letter', 'other'];
 
 function formatJob(job) {
+  const tag = getJobVerificationTag(job);
   return {
     id: job._id,
     title: job.title,
@@ -17,10 +21,15 @@ function formatJob(job) {
     duration: job.duration,
     companyEmail: job.companyEmail,
     hrEmail: job.hrEmail,
+    managerEmail: job.managerEmail,
     description: job.description,
     status: job.status,
+    verificationLevel: job.verificationLevel || 'none',
+    verificationTag: tag,
+    verifiedAt: job.verifiedAt,
+    confidenceScore: job.confidenceScore,
     statusLabel: job.status === 'verified'
-      ? 'Verified'
+      ? tag.label
       : job.status === 'in_process'
         ? 'In Process'
         : 'Not Verified',
@@ -55,14 +64,19 @@ export async function getJobById(userId, jobId) {
   return job;
 }
 
-export async function addJobDocument(userId, jobId, file) {
+export async function addJobDocument(userId, jobId, file, meta = {}) {
   const job = await getJobById(userId, jobId);
   const stored = await storeUploadedFile(file, 'jobs');
+
+  const documentType = DOCUMENT_TYPES.includes(meta.documentType)
+    ? meta.documentType
+    : 'other';
 
   const doc = await Document.create({
     userId,
     jobId: job._id,
     category: 'job',
+    documentType,
     fileName: stored.fileName,
     originalName: stored.originalName,
     mimeType: stored.mimeType,

@@ -84,7 +84,9 @@ export async function verifyBiometric(userId, photoUrl) {
   }
 
   profile.biometricVerified = true;
-  if (photoUrl) profile.photoUrl = photoUrl;
+  if (photoUrl && !profile.photoUrl) {
+    profile.photoUrl = photoUrl;
+  }
   await profile.save();
   await refreshCachedScore(userId);
 
