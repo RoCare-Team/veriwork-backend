@@ -1,5 +1,7 @@
 import { EmployeeProfile } from '../models/EmployeeProfile.js';
 import { JobExperience } from '../models/JobExperience.js';
+import { ActivityLog } from '../models/ActivityLog.js';
+import { PublicProfileAccessRequest } from '../models/PublicProfileAccessRequest.js';
 import { ApiError } from '../utils/ApiError.js';
 import { getInitials } from '../utils/idGenerators.js';
 import {
@@ -49,8 +51,9 @@ function buildPublicProfilePayload(profile, jobs) {
     company: profile.company || '',
     totalExperience: profile.totalExperience || '',
     currentCity: profile.currentCity || '',
-    email: profile.email || '',
+    emailMasked: maskEmail(profile.email),
     phoneMasked: maskPhone(profile.phone),
+    hasFullAccessAvailable: true,
     photoUrl: profile.photoUrl,
     veriworkId: profile.veriworkId,
     publicSlug: profile.publicSlug,
@@ -73,21 +76,53 @@ function buildPublicProfilePayload(profile, jobs) {
 }
 
 export async function getPublicProfileBySlug(slug) {
-  const identity = decodeURIComponent(String(slug || '').trim());
-  if (!identity) throw ApiError.badRequest('Profile identifier is required');
-
-  const profile = await EmployeeProfile.findOne({
-    $or: [{ publicSlug: identity }, { veriworkId: identity }],
-  });
-
-  if (!profile) throw ApiError.notFound('Profile not found');
-  if (profile.publicProfileEnabled === false) {
-    throw ApiError.notFound('This profile is not publicly available');
-  }
-  if (!profile.profileSetupComplete) {
-    throw ApiError.notFound('This profile is not ready to be shared yet');
-  }
-
+  const profile = await findPublicProfile(slug);
   const jobs = await JobExperience.find({ userId: profile.userId }).sort({ createdAt: -1 });
   return buildPublicProfilePayload(profile, jobs);
+}
+
+export async function requestPublicFullProfileAccess(slug, payload) {
+  const profile = await findPublicProfile(slug);
+  const requesterEmail = payload.requesterEmail.trim().toLowerCase();
+
+  const existing = await PublicProfileAccessRequest.findOne({
+    employeeUserId: profile.userId,
+    requesterEmail,
+    status: 'pending',
+  });
+  if (existing) {
+    throw ApiError.conflict('You already have a pending access request for this profile');
+  }
+
+  const accessRequest = await PublicProfileAccessRequest.create({
+    employeeUserId: profile.userId,
+    employeeName: profile.name || '',
+    publicSlug: profile.publicSlug,
+    requesterName: payload.requesterName.trim(),
+    requesterEmail,
+    reason: payload.reason.trim(),
+    status: 'pending',
+  });
+
+  await ActivityLog.create({
+    userId: profile.userId,
+    type: 'access_request',
+    title: 'Full profile access request',
+    message: `${payload.requesterName.trim()} (${requesterEmail}) requested full profile access: ${payload.reason.trim()}`,
+    company: payload.requesterName.trim(),
+    status: 'pending',
+    metadata: {
+      source: 'public_profile',
+      publicProfileAccessRequestId: accessRequest._id.toString(),
+      requesterName: payload.requesterName.trim(),
+      requesterEmail,
+      reason: payload.reason.trim(),
+      publicSlug: profile.publicSlug,
+    },
+  });
+
+  return {
+    message: 'Access request sent. The professional will review your request.',
+    status: 'pending',
+  };
 }

@@ -7,6 +7,11 @@ export async function getPublicProfile(req, res) {
   res.json({ success: true, data });
 }
 
+export async function requestPublicProfileAccess(req, res) {
+  const data = await publicProfileService.requestPublicFullProfileAccess(req.params.slug, req.body);
+  res.status(201).json({ success: true, data });
+}
+
 export async function getEmployeeInvitation(req, res) {
   const data = await invitationService.getPublicInvitationByToken(req.params.token);
   res.json({ success: true, data });
