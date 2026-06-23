@@ -108,11 +108,33 @@ export function buildProfileResponse(profile, jobs = []) {
     dateOfBirth: profile.dateOfBirth || '',
     gender: profile.gender || '',
     role: profile.role || 'Professional',
-    company: profile.company || 'Not set',
+    company: profile.company || '',
     totalExperience: profile.totalExperience || '',
     currentCity: profile.currentCity || '',
     currentAddress: profile.currentAddress || '',
     permanentAddress: profile.permanentAddress || '',
+    education: {
+      class10: {
+        board: profile.education?.class10?.board || '',
+        school: profile.education?.class10?.school || '',
+        passingYear: profile.education?.class10?.passingYear || '',
+        percentage: profile.education?.class10?.percentage || '',
+      },
+      class12: {
+        board: profile.education?.class12?.board || '',
+        school: profile.education?.class12?.school || '',
+        stream: profile.education?.class12?.stream || '',
+        passingYear: profile.education?.class12?.passingYear || '',
+        percentage: profile.education?.class12?.percentage || '',
+      },
+      graduation: {
+        degree: profile.education?.graduation?.degree || '',
+        college: profile.education?.graduation?.college || '',
+        university: profile.education?.graduation?.university || '',
+        passingYear: profile.education?.graduation?.passingYear || '',
+        percentage: profile.education?.graduation?.percentage || '',
+      },
+    },
     initials: getInitials(profile.name),
     skills: profile.skills?.length ? profile.skills : profile.role ? [profile.role] : [],
     profileSetupComplete: profile.profileSetupComplete,
@@ -136,6 +158,24 @@ export function buildProfileResponse(profile, jobs = []) {
   };
 }
 
+function isEducationComplete(education) {
+  const class10 = education?.class10;
+  const class12 = education?.class12;
+  const graduation = education?.graduation;
+
+  return Boolean(
+    class10?.board?.trim()
+    && class10?.school?.trim()
+    && class10?.passingYear?.trim()
+    && class12?.board?.trim()
+    && class12?.school?.trim()
+    && class12?.passingYear?.trim()
+    && graduation?.degree?.trim()
+    && graduation?.college?.trim()
+    && graduation?.passingYear?.trim(),
+  );
+}
+
 function isProfileFieldsComplete(profile) {
   return Boolean(
     profile.name?.trim()
@@ -148,8 +188,21 @@ function isProfileFieldsComplete(profile) {
     && profile.totalExperience?.trim()
     && profile.currentCity?.trim()
     && profile.currentAddress?.trim()
-    && profile.permanentAddress?.trim(),
+    && profile.permanentAddress?.trim()
+    && isEducationComplete(profile.education),
   );
+}
+
+function applyEducationLevel(target, source) {
+  if (!source) return;
+  if (source.board !== undefined) target.board = source.board.trim();
+  if (source.school !== undefined) target.school = source.school.trim();
+  if (source.stream !== undefined) target.stream = source.stream.trim();
+  if (source.degree !== undefined) target.degree = source.degree.trim();
+  if (source.college !== undefined) target.college = source.college.trim();
+  if (source.university !== undefined) target.university = source.university.trim();
+  if (source.passingYear !== undefined) target.passingYear = source.passingYear.trim();
+  if (source.percentage !== undefined) target.percentage = source.percentage.trim();
 }
 
 export async function updateEmployeeProfile(userId, data, photoFile = null) {
@@ -169,6 +222,18 @@ export async function updateEmployeeProfile(userId, data, photoFile = null) {
   if (data.currentAddress !== undefined) profile.currentAddress = data.currentAddress.trim();
   if (data.permanentAddress !== undefined) profile.permanentAddress = data.permanentAddress.trim();
   if (data.skills !== undefined) profile.skills = data.skills;
+
+  if (data.education) {
+    if (!profile.education) profile.education = {};
+    if (!profile.education.class10) profile.education.class10 = {};
+    if (!profile.education.class12) profile.education.class12 = {};
+    if (!profile.education.graduation) profile.education.graduation = {};
+
+    applyEducationLevel(profile.education.class10, data.education.class10);
+    applyEducationLevel(profile.education.class12, data.education.class12);
+    applyEducationLevel(profile.education.graduation, data.education.graduation);
+    profile.markModified('education');
+  }
 
   if (data.phone !== undefined) {
     const normalized = normalizePhone(data.phone);
@@ -254,6 +319,28 @@ export async function getEmployeeSettings(userId) {
     currentCity: profile.currentCity,
     currentAddress: profile.currentAddress,
     permanentAddress: profile.permanentAddress,
+    education: {
+      class10: {
+        board: profile.education?.class10?.board || '',
+        school: profile.education?.class10?.school || '',
+        passingYear: profile.education?.class10?.passingYear || '',
+        percentage: profile.education?.class10?.percentage || '',
+      },
+      class12: {
+        board: profile.education?.class12?.board || '',
+        school: profile.education?.class12?.school || '',
+        stream: profile.education?.class12?.stream || '',
+        passingYear: profile.education?.class12?.passingYear || '',
+        percentage: profile.education?.class12?.percentage || '',
+      },
+      graduation: {
+        degree: profile.education?.graduation?.degree || '',
+        college: profile.education?.graduation?.college || '',
+        university: profile.education?.graduation?.university || '',
+        passingYear: profile.education?.graduation?.passingYear || '',
+        percentage: profile.education?.graduation?.percentage || '',
+      },
+    },
     photoUrl: profile.photoUrl,
     notificationsEnabled: profile.notificationsEnabled ?? true,
     publicProfileEnabled: profile.publicProfileEnabled ?? true,

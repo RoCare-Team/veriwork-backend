@@ -284,6 +284,13 @@ export async function applyVerificationResult(job, result, {
     if (employmentDetails.employmentType) {
       job.employmentType = employmentDetails.employmentType;
     }
+    const statutoryFields = [
+      'employeeCode', 'department', 'workLocation', 'uanNumber', 'pfNumber', 'esiNumber',
+      'companyPan', 'companyCin', 'companyGst', 'lastDrawnSalary', 'managerName',
+    ];
+    for (const field of statutoryFields) {
+      if (employmentDetails[field]) job[field] = employmentDetails[field];
+    }
     if (employmentDetails.confidenceScore != null) {
       job.confidenceScore = employmentDetails.confidenceScore;
     }
@@ -644,6 +651,11 @@ export async function getPublicVerificationByToken(token) {
     joiningDate: job?.joiningDate || '',
     exitDate: job?.exitDate || '',
     duration: job?.duration || '',
+    employeeCode: job?.employeeCode || '',
+    department: job?.department || '',
+    uanNumber: job?.uanNumber || '',
+    pfNumber: job?.pfNumber || '',
+    esiNumber: job?.esiNumber || '',
     status: request.status,
     expiresAt: request.externalTokenExpiresAt,
   };
@@ -686,6 +698,11 @@ export async function respondToPublicVerification(token, payload) {
     rehireEligible: payload.rehireEligible ?? null,
     verificationNotes: payload.verificationNotes || payload.feedback || '',
     employmentType: payload.employmentType || '',
+    employeeCode: payload.employeeCode || '',
+    department: payload.department || '',
+    uanNumber: payload.uanNumber || '',
+    pfNumber: payload.pfNumber || '',
+    esiNumber: payload.esiNumber || '',
   };
   request.resolvedVia = 'hr_response';
   request.respondedAt = new Date();

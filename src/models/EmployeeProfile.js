@@ -1,5 +1,16 @@
 import mongoose from 'mongoose';
 
+const educationLevelSchema = {
+  board: { type: String, default: '' },
+  school: { type: String, default: '' },
+  stream: { type: String, default: '' },
+  degree: { type: String, default: '' },
+  college: { type: String, default: '' },
+  university: { type: String, default: '' },
+  passingYear: { type: String, default: '' },
+  percentage: { type: String, default: '' },
+};
+
 const employeeProfileSchema = new mongoose.Schema(
   {
     userId: {
@@ -24,6 +35,11 @@ const employeeProfileSchema = new mongoose.Schema(
     currentCity: { type: String, default: '' },
     currentAddress: { type: String, default: '' },
     permanentAddress: { type: String, default: '' },
+    education: {
+      class10: { type: educationLevelSchema, default: () => ({}) },
+      class12: { type: educationLevelSchema, default: () => ({}) },
+      graduation: { type: educationLevelSchema, default: () => ({}) },
+    },
     skills: [{ type: String }],
     profileSetupComplete: { type: Boolean, default: false },
     aadhaarVerified: { type: Boolean, default: false },

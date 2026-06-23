@@ -5,7 +5,22 @@ import { storeUploadedFile } from '../utils/fileUpload.js';
 import { refreshCachedScore } from './employeeProfileService.js';
 import { getJobVerificationTag } from './verificationTagsService.js';
 
-const DOCUMENT_TYPES = ['offer_letter', 'salary_slip', 'experience_letter', 'relieving_letter', 'other'];
+const DOCUMENT_TYPES = [
+  'offer_letter',
+  'salary_slip',
+  'experience_letter',
+  'relieving_letter',
+  'pf_statement',
+  'form_16',
+  'other',
+];
+
+function buildDuration(joiningDate, exitDate, isPresent) {
+  if (!joiningDate) return '';
+  if (isPresent) return `${joiningDate} – Present`;
+  if (exitDate) return `${joiningDate} – ${exitDate}`;
+  return joiningDate;
+}
 
 function formatJob(job) {
   const tag = getJobVerificationTag(job);
@@ -18,10 +33,21 @@ function formatJob(job) {
     joiningDate: job.joiningDate,
     exitDate: job.exitDate,
     isPresent: job.isPresent,
-    duration: job.duration,
+    duration: job.duration || buildDuration(job.joiningDate, job.exitDate, job.isPresent),
     companyEmail: job.companyEmail,
     hrEmail: job.hrEmail,
     managerEmail: job.managerEmail,
+    managerName: job.managerName,
+    employeeCode: job.employeeCode,
+    department: job.department,
+    workLocation: job.workLocation,
+    uanNumber: job.uanNumber,
+    pfNumber: job.pfNumber,
+    esiNumber: job.esiNumber,
+    companyPan: job.companyPan,
+    companyCin: job.companyCin,
+    companyGst: job.companyGst,
+    lastDrawnSalary: job.lastDrawnSalary,
     description: job.description,
     status: job.status,
     verificationLevel: job.verificationLevel || 'none',
@@ -53,7 +79,11 @@ export async function listJobs(userId) {
 }
 
 export async function createJob(userId, data) {
-  const job = await JobExperience.create({ userId, ...data });
+  const payload = {
+    ...data,
+    duration: data.duration || buildDuration(data.joiningDate, data.exitDate, data.isPresent),
+  };
+  const job = await JobExperience.create({ userId, ...payload });
   await refreshCachedScore(userId);
   return formatJob(job);
 }

@@ -6,6 +6,7 @@ import * as vaultService from '../services/vaultService.js';
 import * as employeeLinkingService from '../services/employeeLinkingService.js';
 import * as endorsementService from '../services/endorsementService.js';
 import * as verificationRequestService from '../services/verificationRequestService.js';
+import * as profileSuggestionsService from '../services/profileSuggestionsService.js';
 import { storeUploadedFile } from '../utils/fileUpload.js';
 export async function getProfile(req, res) {
   const profile = await profileService.getEmployeeProfile(req.user._id);
@@ -191,5 +192,15 @@ export async function rejectVerificationConsent(req, res) {
 
 export async function getVerificationTags(req, res) {
   const data = await verificationRequestService.getVerificationTags(req.user._id);
+  res.json({ success: true, data });
+}
+
+export async function suggestCompanies(req, res) {
+  const data = await profileSuggestionsService.suggestCompanies(req.query.q);
+  res.json({ success: true, data });
+}
+
+export async function suggestRoles(req, res) {
+  const data = await profileSuggestionsService.suggestRoles(req.query.q);
   res.json({ success: true, data });
 }

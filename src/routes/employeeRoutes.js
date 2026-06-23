@@ -15,6 +15,7 @@ import {
   activityQuerySchema,
   updateSettingsSchema,
   jobVerificationRequestSchema,
+  suggestionsQuerySchema,
 } from '../validators/employeeValidators.js';
 import * as employeeController from '../controllers/employeeController.js';
 
@@ -32,6 +33,16 @@ router.post(
 );
 
 router.get('/profile', asyncHandler(employeeController.getProfile));
+router.get(
+  '/suggestions/companies',
+  validate(suggestionsQuerySchema, 'query'),
+  asyncHandler(employeeController.suggestCompanies),
+);
+router.get(
+  '/suggestions/roles',
+  validate(suggestionsQuerySchema, 'query'),
+  asyncHandler(employeeController.suggestRoles),
+);
 router.patch(
   '/profile',
   uploadPhoto.single('photo'),

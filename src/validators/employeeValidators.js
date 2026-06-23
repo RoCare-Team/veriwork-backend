@@ -22,6 +22,49 @@ const sameAddressField = z.preprocess(
   z.boolean().optional(),
 );
 
+const passingYearField = z
+  .string()
+  .regex(/^\d{4}$/, 'Passing year must be a 4-digit year')
+  .refine((val) => {
+    const year = Number(val);
+    return year >= 1970 && year <= new Date().getFullYear() + 1;
+  }, { message: 'Passing year is out of range' });
+
+const percentageField = z.string().max(20).optional().or(z.literal(''));
+
+const class10EducationSchema = z.object({
+  board: z.string().min(1, '10th board is required').max(100),
+  school: z.string().min(1, '10th school is required').max(150),
+  passingYear: passingYearField,
+  percentage: percentageField,
+});
+
+const class12EducationSchema = z.object({
+  board: z.string().min(1, '12th board is required').max(100),
+  school: z.string().min(1, '12th school is required').max(150),
+  stream: z.string().max(50).optional().or(z.literal('')),
+  passingYear: passingYearField,
+  percentage: percentageField,
+});
+
+const graduationEducationSchema = z.object({
+  degree: z.string().min(1, 'Graduation degree is required').max(100),
+  college: z.string().min(1, 'College name is required').max(150),
+  university: z.string().max(150).optional().or(z.literal('')),
+  passingYear: passingYearField,
+  percentage: percentageField,
+});
+
+const educationSchema = z.object({
+  class10: class10EducationSchema,
+  class12: class12EducationSchema,
+  graduation: graduationEducationSchema,
+});
+
+export const suggestionsQuerySchema = z.object({
+  q: z.string().max(100).optional().default(''),
+});
+
 export const updateProfileSchema = z.object({
   name: z.string().min(1, 'Full name is required').max(100).optional(),
   phone: phoneField.optional(),
@@ -35,6 +78,7 @@ export const updateProfileSchema = z.object({
   currentAddress: z.string().min(1, 'Current address is required').max(300).optional(),
   permanentAddress: z.string().max(300).optional(),
   sameAsCurrentAddress: sameAddressField,
+  education: educationSchema.optional(),
   skills: z.array(z.string()).optional(),
   invitationToken: z.string().min(10).optional(),
 });
@@ -55,6 +99,7 @@ export const setupProfileSchema = z
     currentAddress: z.string().min(1, 'Current address is required').max(300),
     permanentAddress: z.string().max(300).optional(),
     sameAsCurrentAddress: sameAddressField,
+    education: educationSchema,
     invitationToken: z.string().min(10).optional(),
   })
   .superRefine((data, ctx) => {
@@ -83,15 +128,34 @@ export const createJobSchema = z.object({
   title: z.string().min(1),
   company: z.string().min(1),
   employmentType: z.string().optional(),
-  salaryBand: z.string().optional(),
-  joiningDate: z.string().optional(),
-  exitDate: z.string().optional(),
-  isPresent: z.boolean().optional(),
-  duration: z.string().optional(),
-  companyEmail: z.string().optional(),
+  salaryBand: z.string().max(50).optional(),
+  joiningDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Joining date must be YYYY-MM-DD').optional().or(z.literal('')),
+  exitDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Exit date must be YYYY-MM-DD').optional().or(z.literal('')),
+  isPresent: z.preprocess((val) => val === true || val === 'true', z.boolean().optional()),
+  duration: z.string().max(100).optional(),
+  companyEmail: z.string().email().optional().or(z.literal('')),
   hrEmail: z.string().email().optional().or(z.literal('')),
   managerEmail: z.string().email().optional().or(z.literal('')),
-  description: z.string().optional(),
+  managerName: z.string().max(100).optional(),
+  employeeCode: z.string().max(50).optional(),
+  department: z.string().max(100).optional(),
+  workLocation: z.string().max(100).optional(),
+  uanNumber: z.string().regex(/^\d{12}$/, 'UAN must be 12 digits').optional().or(z.literal('')),
+  pfNumber: z.string().max(30).optional(),
+  esiNumber: z.string().max(20).optional(),
+  companyPan: z.string().regex(/^[A-Z]{5}\d{4}[A-Z]$/i, 'Invalid company PAN').optional().or(z.literal('')),
+  companyCin: z.string().max(25).optional(),
+  companyGst: z.string().max(20).optional(),
+  lastDrawnSalary: z.string().max(30).optional(),
+  description: z.string().max(2000).optional(),
+}).superRefine((data, ctx) => {
+  if (!data.isPresent && data.joiningDate && data.exitDate && data.exitDate < data.joiningDate) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Exit date cannot be before joining date',
+      path: ['exitDate'],
+    });
+  }
 });
 
 export const jobVerificationRequestSchema = z.object({

@@ -49,6 +49,16 @@ export const approveVerificationRequestSchema = z.object({
   verificationNotes: z.string().max(1000).optional(),
   employmentType: z.string().optional(),
   employmentStatus: z.string().optional(),
+  employeeCode: z.string().max(50).optional(),
+  department: z.string().max(100).optional(),
+  workLocation: z.string().max(100).optional(),
+  uanNumber: z.string().max(12).optional(),
+  pfNumber: z.string().max(30).optional(),
+  esiNumber: z.string().max(20).optional(),
+  companyPan: z.string().max(10).optional(),
+  companyCin: z.string().max(25).optional(),
+  companyGst: z.string().max(20).optional(),
+  lastDrawnSalary: z.string().max(30).optional(),
   notes: z.string().max(500).optional(),
 });
 

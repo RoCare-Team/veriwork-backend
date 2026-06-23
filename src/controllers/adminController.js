@@ -23,3 +23,16 @@ export async function reviewCompany(req, res) {
   );
   res.json({ success: true, data: result });
 }
+
+export async function listEmployees(req, res) {
+  const employees = await adminService.listEmployees({
+    q: req.query.q,
+    status: req.query.status,
+  });
+  res.json({ success: true, data: employees });
+}
+
+export async function getEmployee(req, res) {
+  const employee = await adminService.getEmployee(req.params.id);
+  res.json({ success: true, data: employee });
+}
