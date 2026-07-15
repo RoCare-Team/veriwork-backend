@@ -7,7 +7,24 @@ import * as employeeLinkingService from '../services/employeeLinkingService.js';
 import * as endorsementService from '../services/endorsementService.js';
 import * as verificationRequestService from '../services/verificationRequestService.js';
 import * as profileSuggestionsService from '../services/profileSuggestionsService.js';
+import * as smtpSettingsService from '../services/smtpSettingsService.js';
 import { storeUploadedFile } from '../utils/fileUpload.js';
+
+export async function getSmtpSettings(req, res) {
+  const data = await smtpSettingsService.getEmployeeSmtpSettings(req.user);
+  res.json({ success: true, data });
+}
+
+export async function updateSmtpSettings(req, res) {
+  const data = await smtpSettingsService.updateEmployeeSmtpSettings(req.user, req.body);
+  res.json({ success: true, data });
+}
+
+export async function testSmtpSettings(req, res) {
+  const data = await smtpSettingsService.sendEmployeeSmtpTest(req.user, req.body);
+  res.json({ success: true, data });
+}
+
 export async function getProfile(req, res) {
   const profile = await profileService.getEmployeeProfile(req.user._id);
   res.json({ success: true, data: profile });

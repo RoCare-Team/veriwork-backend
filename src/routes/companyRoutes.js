@@ -14,6 +14,8 @@ import {
   assignEmployeeOnboardingSchema,
   inviteEmployeeSchema,
   revokeAccessSchema,
+  smtpSettingsSchema,
+  smtpTestSchema,
 } from '../validators/companyValidators.js';
 
 const router = Router();
@@ -81,8 +83,17 @@ router.post(
   validate(emailVerificationCompleteSchema),
   asyncHandler(companyController.completeEmailVerification),
 );
+router.post(
+  '/verification-requests/:id/resend-email',
+  asyncHandler(companyController.resendVerificationEmail),
+);
 
-// 5. Insights & analytics
+// 5. SMTP settings
+router.get('/settings/smtp', asyncHandler(companyController.getSmtpSettings));
+router.put('/settings/smtp', validate(smtpSettingsSchema), asyncHandler(companyController.updateSmtpSettings));
+router.post('/settings/smtp/test', validate(smtpTestSchema), asyncHandler(companyController.testSmtpSettings));
+
+// 6. Insights & analytics
 router.get('/insights', asyncHandler(companyController.getInsights));
 
 // 6. Audit logs

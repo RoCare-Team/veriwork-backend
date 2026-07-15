@@ -1,6 +1,7 @@
 import * as companyLinkingService from '../services/companyLinkingService.js';
 import * as verificationRequestService from '../services/verificationRequestService.js';
 import * as workforceOnboardingService from '../services/workforceOnboardingService.js';
+import * as smtpSettingsService from '../services/smtpSettingsService.js';
 import { searchPlatformCompanies } from '../services/employmentVerificationService.js';
 import { listAccessRequestTypes as getAccessRequestTypeOptions } from '../services/accessRequestTypesService.js';
 
@@ -173,11 +174,31 @@ export async function completeEmailVerification(req, res) {
   res.json({ success: true, data });
 }
 
+export async function resendVerificationEmail(req, res) {
+  const data = await verificationRequestService.resendVerificationEmail(req.user, req.params.id);
+  res.json({ success: true, data });
+}
+
 export async function assignEmployeeOnboarding(req, res) {
   const data = await workforceOnboardingService.assignEmployeeOnboarding(
     req.user,
     req.params.employeeId,
     req.body,
   );
+  res.json({ success: true, data });
+}
+
+export async function getSmtpSettings(req, res) {
+  const data = await smtpSettingsService.getCompanySmtpSettings(req.user);
+  res.json({ success: true, data });
+}
+
+export async function updateSmtpSettings(req, res) {
+  const data = await smtpSettingsService.updateCompanySmtpSettings(req.user, req.body);
+  res.json({ success: true, data });
+}
+
+export async function testSmtpSettings(req, res) {
+  const data = await smtpSettingsService.sendCompanySmtpTest(req.user, req.body);
   res.json({ success: true, data });
 }

@@ -183,3 +183,18 @@ export const updateSettingsSchema = z.object({
   publicProfileEnabled: z.boolean().optional(),
   language: z.string().min(2).max(20).optional(),
 });
+
+export const smtpSettingsSchema = z.object({
+  host: z.string().trim().max(200).optional(),
+  port: z.coerce.number().int().min(1).max(65535).optional(),
+  secure: z.boolean().optional(),
+  username: z.string().trim().max(200).optional(),
+  // Write-only; empty string / omitted keeps the stored password.
+  password: z.string().max(300).optional(),
+  senderName: z.string().trim().max(120).optional(),
+  senderEmail: z.string().trim().email('Valid sender email is required').max(200).optional().or(z.literal('')),
+});
+
+export const smtpTestSchema = z.object({
+  to: z.string().trim().email('Valid recipient email is required').max(200).optional(),
+});

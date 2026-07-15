@@ -80,6 +80,12 @@ export const env = Object.freeze({
 
   frontendUrl: process.env.FRONTEND_URL || process.env.CORS_ORIGIN || "http://localhost:5173",
 
+  // Key used to encrypt sensitive at-rest secrets (e.g. per-company SMTP passwords).
+  encryptionKey:
+    process.env.ENCRYPTION_KEY ||
+    process.env.JWT_ACCESS_SECRET ||
+    devDefaults.JWT_ACCESS_SECRET,
+
   email: {
     enabled: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
     from: process.env.EMAIL_FROM || "PagerLook <noreply@pagerlook.com>",

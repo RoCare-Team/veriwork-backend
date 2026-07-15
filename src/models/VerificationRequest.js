@@ -22,6 +22,30 @@ const employmentDetailsSchema = new mongoose.Schema(
     companyCin: { type: String, default: '' },
     companyGst: { type: String, default: '' },
     lastDrawnSalary: { type: String, default: '' },
+    // Structured HR verification form
+    reportingManager: { type: String, default: '' },
+    performanceRating: {
+      type: String,
+      enum: ['excellent', 'good', 'average', 'below_average', 'poor', ''],
+      default: '',
+    },
+    behaviorRemarks: { type: String, default: '' },
+    disciplinaryIssues: { type: Boolean, default: null },
+    disciplinaryDetails: { type: String, default: '' },
+    recommendation: {
+      type: String,
+      enum: ['strongly_recommend', 'recommend', 'neutral', 'not_recommend', ''],
+      default: '',
+    },
+    hrRemarks: { type: String, default: '' },
+    supportingDocumentUrl: { type: String, default: '' },
+    supportingDocumentName: { type: String, default: '' },
+    // Verifier identity + declaration
+    verifierName: { type: String, default: '' },
+    verifierDesignation: { type: String, default: '' },
+    verifierEmail: { type: String, default: '' },
+    verifierPhone: { type: String, default: '' },
+    declarationAccepted: { type: Boolean, default: false },
   },
   { _id: false },
 );
@@ -71,6 +95,9 @@ const verificationRequestSchema = new mongoose.Schema(
     },
     hrEmail: { type: String, default: '' },
     managerEmail: { type: String, default: '' },
+    // Additional HR recipients beyond hrEmail/managerEmail — see
+    // sendVerificationEmails, which mails the union of all three.
+    hrContacts: { type: [String], default: [] },
     hrName: { type: String, default: '' },
     status: {
       type: String,
@@ -108,6 +135,13 @@ const verificationRequestSchema = new mongoose.Schema(
     employmentDetails: { type: employmentDetailsSchema, default: () => ({}) },
     externalToken: { type: String, default: null, index: true },
     externalTokenExpiresAt: { type: Date, default: null },
+    // Delivery tracking for the email channel so the dashboard can show sent/failed + allow resend.
+    emailStatus: {
+      type: String,
+      enum: ['not_applicable', 'not_sent', 'sent', 'mock', 'failed'],
+      default: 'not_applicable',
+    },
+    emailLastSentAt: { type: Date, default: null },
     scoreImpactApplied: { type: Boolean, default: false },
     notes: { type: String, default: '' },
     resolvedVia: {

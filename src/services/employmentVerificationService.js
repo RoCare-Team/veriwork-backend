@@ -7,9 +7,11 @@ import { JobExperience } from '../models/JobExperience.js';
 import { VerificationRequest } from '../models/VerificationRequest.js';
 import { ApiError } from '../utils/ApiError.js';
 import { assertValidObjectId } from '../utils/objectId.js';
+import { storeUploadedFile } from '../utils/fileUpload.js';
 import { createActivity } from './activityService.js';
 import { refreshCachedScore } from './employeeProfileService.js';
 import { sendEmploymentVerificationEmail } from './emailService.js';
+import { getDecryptedSmtpConfig } from './smtpSettingsService.js';
 import {
   computeProfileVerificationTags,
   getJobVerificationTag,
@@ -24,6 +26,21 @@ import {
 } from '../utils/verificationStatusUtils.js';
 
 const TOKEN_EXPIRY_DAYS = 14;
+
+/** Trimmed, non-empty, case-insensitively deduped email list (order preserved). */
+export function uniqueEmails(values = []) {
+  const seen = new Set();
+  const out = [];
+  for (const value of values) {
+    const email = String(value || '').trim();
+    if (!email) continue;
+    const key = email.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(email);
+  }
+  return out;
+}
 
 /** Normalize for fuzzy company name matching */
 export function normalizeCompanyName(name) {
@@ -136,6 +153,8 @@ export function mapVerificationRequest(request, extras = {}) {
     requestedAt: request.requestedAt || request.createdAt,
     respondedAt: request.respondedAt,
     resolvedVia: request.resolvedVia,
+    emailStatus: request.emailStatus || 'not_applicable',
+    emailLastSentAt: request.emailLastSentAt || null,
     ...extras,
   };
 }
@@ -328,6 +347,40 @@ export async function resolveVerificationLevel(verificationChannel, workedHere =
   return verificationChannel === 'platform' ? 'employer_verified' : 'hr_verified';
 }
 
+/** Normalize the public HR verification form payload into the stored employmentDetails shape. */
+export function buildEmploymentDetailsFromPayload(payload = {}, workedHere = true) {
+  return {
+    workedHere,
+    designation: payload.designation || '',
+    joiningDate: payload.joiningDate || '',
+    exitDate: payload.exitDate || '',
+    duration: payload.duration || '',
+    feedback: payload.feedback || '',
+    rehireEligible: payload.rehireEligible ?? null,
+    verificationNotes: payload.verificationNotes || payload.hrRemarks || payload.feedback || '',
+    employmentType: payload.employmentType || '',
+    employeeCode: payload.employeeCode || '',
+    department: payload.department || '',
+    uanNumber: payload.uanNumber || '',
+    pfNumber: payload.pfNumber || '',
+    esiNumber: payload.esiNumber || '',
+    reportingManager: payload.reportingManager || '',
+    performanceRating: payload.performanceRating || '',
+    behaviorRemarks: payload.behaviorRemarks || '',
+    disciplinaryIssues: payload.disciplinaryIssues ?? null,
+    disciplinaryDetails: payload.disciplinaryDetails || '',
+    recommendation: payload.recommendation || '',
+    hrRemarks: payload.hrRemarks || '',
+    supportingDocumentUrl: payload.supportingDocumentUrl || '',
+    supportingDocumentName: payload.supportingDocumentName || '',
+    verifierName: payload.verifierName || '',
+    verifierDesignation: payload.verifierDesignation || '',
+    verifierEmail: payload.verifierEmail || '',
+    verifierPhone: payload.verifierPhone || '',
+    declarationAccepted: payload.declarationAccepted === true,
+  };
+}
+
 async function createVerificationRequestRecord({
   initiatedBy,
   requestingCompanyId,
@@ -338,6 +391,7 @@ async function createVerificationRequestRecord({
   verificationChannel,
   hrEmail,
   managerEmail,
+  hrContacts,
   hrName,
   requestedBy,
   status,
@@ -358,6 +412,7 @@ async function createVerificationRequestRecord({
     verificationChannel,
     hrEmail: hrEmail || '',
     managerEmail: managerEmail || '',
+    hrContacts: uniqueEmails(hrContacts),
     hrName: hrName || '',
     status,
     requestedBy,
@@ -369,28 +424,65 @@ async function createVerificationRequestRecord({
 }
 
 export async function sendVerificationEmails(request, job, employeeProfile) {
-  const recipients = [request.hrEmail, request.managerEmail].filter(Boolean);
+  // hrEmail/managerEmail mirror hrContacts[0]/[1], so the union is deduped
+  // case-insensitively to avoid mailing the same HR twice.
+  const recipients = uniqueEmails([
+    request.hrEmail,
+    request.managerEmail,
+    ...(request.hrContacts || []),
+  ]);
   if (recipients.length === 0) return { sent: false, mock: true };
+
+  // Verification emails are dispatched using the requester's own saved SMTP
+  // credentials: the REQUESTING company for company-initiated requests, or the
+  // EMPLOYEE for self-initiated requests. Falls back to global env SMTP / mock.
+  let companySmtp = null;
+  let requestingCompanyName = '';
+  if (request.requestingCompanyId) {
+    const company = await Company.findById(request.requestingCompanyId);
+    if (company) {
+      requestingCompanyName = company.name || '';
+      companySmtp = getDecryptedSmtpConfig(company);
+    }
+  } else {
+    // Employee-initiated: send from the employee's own mailbox if configured.
+    const profile = await EmployeeProfile.findOne({ userId: request.employeeId });
+    if (profile) companySmtp = getDecryptedSmtpConfig(profile);
+  }
 
   const results = await Promise.all(
     recipients.map((to) => sendEmploymentVerificationEmail({
       to,
+      hrName: request.hrName || '',
       employeeName: employeeProfile?.name || 'Employee',
       previousCompanyName: job.company,
+      requestingCompanyName,
       designation: job.title,
       duration: job.duration,
       verificationLink: request.externalToken
         ? `${env.frontendUrl}/verify-employment/${request.externalToken}`
         : null,
       isPlatformCompany: request.verificationChannel === 'platform',
+      initiatedBy: request.initiatedBy,
+      companySmtp,
     })),
   );
 
   return {
     sent: results.some((r) => r.sent),
-    mock: results.every((r) => r.mock),
+    mock: results.length > 0 && results.every((r) => r.mock),
+    failed: results.length > 0 && results.every((r) => !r.sent && !r.mock),
     recipients,
   };
+}
+
+/** Map an email dispatch result to a persisted delivery status. */
+export function deriveEmailStatus(verificationChannel, result) {
+  if (verificationChannel !== 'email') return 'not_applicable';
+  if (!result) return 'not_sent';
+  if (result.sent) return 'sent';
+  if (result.mock) return 'mock';
+  return 'failed';
 }
 
 export async function createEmployeeVerificationRequest(userId, jobId, payload) {
@@ -427,11 +519,16 @@ export async function createEmployeeVerificationRequest(userId, jobId, payload) 
     );
   }
 
-  const hrEmail = payload.hrEmail || job.hrEmail || '';
-  const managerEmail = payload.managerEmail || job.managerEmail || job.companyEmail || '';
+  const hrContacts = uniqueEmails(
+    payload.hrContacts?.length ? payload.hrContacts : job.hrContacts,
+  );
+  const hrEmail = payload.hrEmail || hrContacts[0] || job.hrEmail || '';
+  const managerEmail =
+    payload.managerEmail || hrContacts[1] || job.managerEmail || job.companyEmail || '';
 
   if (hrEmail) job.hrEmail = hrEmail;
   if (managerEmail) job.managerEmail = managerEmail;
+  if (hrContacts.length) job.hrContacts = hrContacts;
   if (job.status !== 'verified' && job.status !== 'in_process') {
     job.status = 'in_process';
   }
@@ -440,8 +537,8 @@ export async function createEmployeeVerificationRequest(userId, jobId, payload) 
   const previousCompany = await findPreviousCompanyByName(job.company);
   const verificationChannel = previousCompany ? 'platform' : 'email';
 
-  if (verificationChannel === 'email' && !hrEmail && !managerEmail) {
-    throw ApiError.badRequest('HR email or manager email is required when company is not on PagerLook');
+  if (verificationChannel === 'email' && !hrEmail && !managerEmail && !hrContacts.length) {
+    throw ApiError.badRequest('At least one HR contact email is required when company is not on PagerLook');
   }
 
   const profile = await EmployeeProfile.findOne({ userId }).select('name');
@@ -456,6 +553,7 @@ export async function createEmployeeVerificationRequest(userId, jobId, payload) 
     verificationChannel,
     hrEmail,
     managerEmail,
+    hrContacts,
     hrName: payload.hrName || '',
     requestedBy: userId,
     status: verificationChannel === 'platform' ? 'pending' : 'in_review',
@@ -467,6 +565,9 @@ export async function createEmployeeVerificationRequest(userId, jobId, payload) 
   let emailResult = { sent: false, mock: true };
   if (verificationChannel === 'email') {
     emailResult = await sendVerificationEmails(verificationRequest, job, profile);
+    verificationRequest.emailStatus = deriveEmailStatus(verificationChannel, emailResult);
+    verificationRequest.emailLastSentAt = new Date();
+    await verificationRequest.save();
   }
 
   await createActivity(userId, {
@@ -637,27 +738,67 @@ export async function getPublicVerificationByToken(token) {
     throw ApiError.badRequest('This verification request has already been processed');
   }
 
-  const [job, profile] = await Promise.all([
+  const [job, profile, requestingCompany, documents] = await Promise.all([
     JobExperience.findById(request.jobExperienceId),
-    EmployeeProfile.findOne({ userId: request.employeeId }).select('name veriworkId'),
+    EmployeeProfile.findOne({ userId: request.employeeId }).select('name veriworkId email'),
+    request.requestingCompanyId
+      ? Company.findById(request.requestingCompanyId).select('name')
+      : Promise.resolve(null),
+    Document.find({ userId: request.employeeId, jobId: request.jobExperienceId }).sort({ createdAt: -1 }),
   ]);
 
   return {
     requestId: request._id,
     employeeName: profile?.name || 'Employee',
     employeePagerlookId: profile?.veriworkId || '',
+    requestingCompanyName: requestingCompany?.name || '',
     previousCompanyName: request.previousCompanyName,
     designation: job?.title || '',
+    employmentType: job?.employmentType || '',
     joiningDate: job?.joiningDate || '',
     exitDate: job?.exitDate || '',
     duration: job?.duration || '',
     employeeCode: job?.employeeCode || '',
     department: job?.department || '',
+    workLocation: job?.workLocation || '',
+    reportingManager: job?.managerName || '',
     uanNumber: job?.uanNumber || '',
     pfNumber: job?.pfNumber || '',
     esiNumber: job?.esiNumber || '',
+    documents: documents.map((doc) => ({
+      id: doc._id,
+      documentType: doc.documentType || 'other',
+      originalName: doc.originalName || doc.fileName,
+      url: doc.url,
+      uploadedAt: doc.createdAt,
+    })),
     status: request.status,
     expiresAt: request.externalTokenExpiresAt,
+  };
+}
+
+/**
+ * Public (no-auth) upload of a verifier's supporting document, keyed by token.
+ * Returns the stored file's URL to include in the subsequent form submission.
+ */
+export async function uploadPublicVerificationDocument(token, file) {
+  if (!token?.trim()) throw ApiError.badRequest('Verification token is required');
+  if (!file) throw ApiError.badRequest('No file provided');
+
+  const request = await VerificationRequest.findOne({ externalToken: token.trim() });
+  if (!request) throw ApiError.notFound('Verification request not found or expired');
+
+  await markExpiredIfNeeded(request);
+  if (!OPEN_STATUSES.includes(request.status) && request.status !== 'pending') {
+    throw ApiError.badRequest('This verification request can no longer accept documents');
+  }
+
+  const stored = await storeUploadedFile(file, 'verification-documents');
+  return {
+    url: stored.url,
+    originalName: stored.originalName,
+    mimeType: stored.mimeType,
+    size: stored.size,
   };
 }
 
@@ -688,22 +829,12 @@ export async function respondToPublicVerification(token, payload) {
   const verificationLevel = await resolveVerificationLevel(request.verificationChannel, workedHere);
   const isCompanyInitiated = request.initiatedBy === 'company' && request.requestingCompanyId;
 
-  request.employmentDetails = {
-    workedHere,
-    designation: payload.designation || '',
-    joiningDate: payload.joiningDate || '',
-    exitDate: payload.exitDate || '',
-    duration: payload.duration || '',
-    feedback: payload.feedback || '',
-    rehireEligible: payload.rehireEligible ?? null,
-    verificationNotes: payload.verificationNotes || payload.feedback || '',
-    employmentType: payload.employmentType || '',
-    employeeCode: payload.employeeCode || '',
-    department: payload.department || '',
-    uanNumber: payload.uanNumber || '',
-    pfNumber: payload.pfNumber || '',
-    esiNumber: payload.esiNumber || '',
-  };
+  if (payload.declarationAccepted !== true) {
+    throw ApiError.badRequest('Please accept the declaration to submit the verification');
+  }
+
+  request.employmentDetails = buildEmploymentDetailsFromPayload(payload, workedHere);
+  request.hrName = payload.verifierName || request.hrName;
   request.resolvedVia = 'hr_response';
   request.respondedAt = new Date();
   request.notes = payload.feedback || request.notes;

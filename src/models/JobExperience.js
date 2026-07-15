@@ -17,6 +17,10 @@ const jobExperienceSchema = new mongoose.Schema(
     isPresent: { type: Boolean, default: false },
     duration: { type: String, default: '' },
     companyEmail: { type: String, default: '' },
+    // Full list of HR contacts to notify. hrEmail/managerEmail below mirror
+    // hrContacts[0]/[1] so existing readers (companyLinkingService, older rows)
+    // keep working; hrContacts is the source of truth for 3+ contacts.
+    hrContacts: { type: [String], default: [] },
     hrEmail: { type: String, default: '' },
     managerEmail: { type: String, default: '' },
     managerName: { type: String, default: '' },

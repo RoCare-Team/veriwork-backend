@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { validate } from '../middleware/validate.js';
+import { upload } from '../middleware/upload.js';
 import * as publicController from '../controllers/publicController.js';
 import { publicProfileAccessRequestSchema, publicVerificationRespondSchema } from '../validators/publicValidators.js';
 
@@ -14,6 +15,11 @@ router.post(
 );
 router.get('/employee-invitation/:token', asyncHandler(publicController.getEmployeeInvitation));
 router.get('/employment-verification/:token', asyncHandler(publicController.getEmploymentVerification));
+router.post(
+  '/employment-verification/:token/document',
+  upload.single('document'),
+  asyncHandler(publicController.uploadEmploymentVerificationDocument),
+);
 router.post(
   '/employment-verification/:token',
   validate(publicVerificationRespondSchema),

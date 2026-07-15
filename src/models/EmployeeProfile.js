@@ -11,6 +11,23 @@ const educationLevelSchema = {
   percentage: { type: String, default: '' },
 };
 
+// Per-employee SMTP config so verification emails to a past employer's HR are
+// sent from the employee's own mailbox. Password stored encrypted (utils/crypto.js).
+const smtpSettingsSchema = new mongoose.Schema(
+  {
+    host: { type: String, default: '' },
+    port: { type: Number, default: 587 },
+    secure: { type: Boolean, default: false },
+    username: { type: String, default: '' },
+    passwordEnc: { type: String, default: '' },
+    senderName: { type: String, default: '' },
+    senderEmail: { type: String, default: '' },
+    configured: { type: Boolean, default: false },
+    updatedAt: { type: Date, default: null },
+  },
+  { _id: false },
+);
+
 const employeeProfileSchema = new mongoose.Schema(
   {
     userId: {
@@ -54,6 +71,7 @@ const employeeProfileSchema = new mongoose.Schema(
     notificationsEnabled: { type: Boolean, default: true },
     publicProfileEnabled: { type: Boolean, default: true },
     language: { type: String, default: 'en-US' },
+    smtp: { type: smtpSettingsSchema, default: () => ({}) },
   },
   { timestamps: true },
 );

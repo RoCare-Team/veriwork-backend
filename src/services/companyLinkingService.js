@@ -62,15 +62,21 @@ async function createCompanyAuditLog({
   entityId,
   metadata = {},
 }) {
-  await CompanyAuditLog.create({
-    companyId,
-    actorUserId,
-    employeeId,
-    action,
-    entityType,
-    entityId: entityId ? String(entityId) : '',
-    metadata,
-  });
+  // Audit logging is a side-effect — never let a failed audit write break the
+  // core operation (e.g. verification). Log and continue.
+  try {
+    await CompanyAuditLog.create({
+      companyId,
+      actorUserId,
+      employeeId,
+      action,
+      entityType,
+      entityId: entityId ? String(entityId) : '',
+      metadata,
+    });
+  } catch (err) {
+    console.error(`[audit] Failed to write company audit log (action: ${action}):`, err.message);
+  }
 }
 
 async function resolveEmployee({ employeeEmail, employeeMobile, employeePagerlookId }) {

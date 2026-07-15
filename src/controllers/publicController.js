@@ -29,3 +29,11 @@ export async function respondEmploymentVerification(req, res) {
   );
   res.json({ success: true, data });
 }
+
+export async function uploadEmploymentVerificationDocument(req, res) {
+  const data = await verificationRequestService.uploadPublicVerificationDocument(
+    req.params.token,
+    req.file,
+  );
+  res.status(201).json({ success: true, data });
+}

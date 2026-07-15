@@ -35,6 +35,9 @@ function formatJob(job) {
     isPresent: job.isPresent,
     duration: job.duration || buildDuration(job.joiningDate, job.exitDate, job.isPresent),
     companyEmail: job.companyEmail,
+    hrContacts: job.hrContacts?.length
+      ? job.hrContacts
+      : [job.hrEmail, job.managerEmail].filter(Boolean), // pre-hrContacts rows
     hrEmail: job.hrEmail,
     managerEmail: job.managerEmail,
     managerName: job.managerName,

@@ -16,6 +16,8 @@ import {
   updateSettingsSchema,
   jobVerificationRequestSchema,
   suggestionsQuerySchema,
+  smtpSettingsSchema,
+  smtpTestSchema,
 } from '../validators/employeeValidators.js';
 import * as employeeController from '../controllers/employeeController.js';
 
@@ -116,5 +118,10 @@ router.patch(
   validate(updateSettingsSchema),
   asyncHandler(employeeController.updateSettings),
 );
+
+// Employee SMTP (mailbox) settings — used to send self-initiated verification emails
+router.get('/settings/smtp', asyncHandler(employeeController.getSmtpSettings));
+router.put('/settings/smtp', validate(smtpSettingsSchema), asyncHandler(employeeController.updateSmtpSettings));
+router.post('/settings/smtp/test', validate(smtpTestSchema), asyncHandler(employeeController.testSmtpSettings));
 
 export default router;

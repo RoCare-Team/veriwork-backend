@@ -24,7 +24,9 @@ import {
   maybeApplyDocumentFallback,
   getPublicVerificationByToken,
   respondToPublicVerification,
+  uploadPublicVerificationDocument,
   sendVerificationEmails,
+  deriveEmailStatus,
   isPermanentlyVerifiedJob,
   applyVerificationResult,
   generateExternalToken,
@@ -105,7 +107,54 @@ export async function createVerificationRequest(user, payload) {
     status: { $in: [...OPEN_STATUSES, 'pending'] },
   });
   if (existingPending) {
-    throw ApiError.conflict('A pending verification request already exists for this job');
+    // Only block when the previous request actually reached the recipient. If a prior
+    // email never went out (failed / mock / not configured), retry on the SAME request
+    // instead of throwing — no duplicate, and the user isn't stuck.
+    const emailNeverSent = existingPending.verificationChannel === 'email'
+      && ['failed', 'mock', 'not_sent', 'not_applicable'].includes(existingPending.emailStatus);
+
+    if (!emailNeverSent) {
+      throw ApiError.conflict('A pending verification request already exists for this job');
+    }
+
+    const retryHrEmail = payload.hrEmail || existingPending.hrEmail || job.hrEmail || '';
+    const retryManagerEmail = payload.managerEmail
+      || existingPending.managerEmail || job.managerEmail || job.companyEmail || '';
+    if (!retryHrEmail && !retryManagerEmail) {
+      throw ApiError.badRequest('HR email or manager email is required to send the verification');
+    }
+
+    existingPending.hrEmail = retryHrEmail;
+    existingPending.managerEmail = retryManagerEmail;
+    if (payload.hrName) existingPending.hrName = payload.hrName;
+
+    const now = Date.now();
+    if (!existingPending.externalToken
+      || (existingPending.externalTokenExpiresAt && existingPending.externalTokenExpiresAt.getTime() <= now)) {
+      existingPending.externalToken = generateExternalToken();
+      existingPending.externalTokenExpiresAt = new Date(now + 14 * 24 * 60 * 60 * 1000);
+    }
+    await existingPending.save();
+
+    const retryProfile = await EmployeeProfile.findOne({ userId: employeeId }).select('name');
+    const retryResult = await sendVerificationEmails(existingPending, job, retryProfile);
+    existingPending.emailStatus = deriveEmailStatus('email', retryResult);
+    existingPending.emailLastSentAt = new Date();
+    await existingPending.save();
+
+    return mapVerificationRequest(existingPending, {
+      employeeName: linkedEmployee.employeeName || '',
+      jobTitle: job.title,
+      companyName: job.company,
+      previousCompanyRegistered: false,
+      emailSent: retryResult.sent,
+      emailMock: retryResult.mock,
+      message: retryResult.sent
+        ? 'Verification email sent to HR/Manager'
+        : retryResult.mock
+          ? 'Mailer not configured — logged in mock mode. Configure SMTP in Settings to send for real.'
+          : 'Could not send the email. Check your SMTP settings and try again.',
+    });
   }
 
   const previousCompany = payload.targetCompanyId
@@ -169,6 +218,9 @@ export async function createVerificationRequest(user, payload) {
   if (verificationChannel === 'email') {
     const profile = await EmployeeProfile.findOne({ userId: employeeId }).select('name');
     emailResult = await sendVerificationEmails(verificationRequest, job, profile);
+    verificationRequest.emailStatus = deriveEmailStatus(verificationChannel, emailResult);
+    verificationRequest.emailLastSentAt = new Date();
+    await verificationRequest.save();
   }
 
   await createCompanyAuditLog({
@@ -677,6 +729,60 @@ export async function getEmployeeJobVerificationRecord(user, employeeId, jobId) 
   };
 }
 
+export async function resendVerificationEmail(user, requestId) {
+  const companyId = requireCompanyId(user);
+  const validId = assertValidObjectId(requestId, 'verification request id');
+
+  const request = await VerificationRequest.findOne({
+    _id: validId,
+    requestingCompanyId: companyId,
+    verificationChannel: 'email',
+  });
+
+  if (!request) throw ApiError.notFound('Email verification request not found');
+  if (!['in_review', 'in_process'].includes(request.status)) {
+    throw ApiError.badRequest('This request can no longer be re-sent (already responded, verified, or closed)');
+  }
+
+  const job = await JobExperience.findById(request.jobExperienceId);
+  if (!job) throw ApiError.notFound('Job experience not found');
+
+  // Refresh the secure token if it has expired so the resent link stays valid.
+  const now = Date.now();
+  if (!request.externalToken || (request.externalTokenExpiresAt && request.externalTokenExpiresAt.getTime() <= now)) {
+    request.externalToken = generateExternalToken();
+    request.externalTokenExpiresAt = new Date(now + 14 * 24 * 60 * 60 * 1000);
+    await request.save();
+  }
+
+  const profile = await EmployeeProfile.findOne({ userId: request.employeeId }).select('name');
+  const emailResult = await sendVerificationEmails(request, job, profile);
+
+  request.emailStatus = deriveEmailStatus('email', emailResult);
+  request.emailLastSentAt = new Date();
+  await request.save();
+
+  await createCompanyAuditLog({
+    companyId,
+    actorUserId: user._id,
+    employeeId: request.employeeId,
+    action: 'verification_email_resent',
+    entityType: 'verification_request',
+    entityId: request._id,
+    metadata: { emailStatus: request.emailStatus, recipients: emailResult.recipients || [] },
+  });
+
+  return mapVerificationRequest(request, {
+    emailSent: emailResult.sent,
+    emailMock: emailResult.mock,
+    message: emailResult.sent
+      ? 'Verification email re-sent successfully'
+      : emailResult.mock
+        ? 'Mailer not configured — email logged in mock mode. Configure SMTP to send for real.'
+        : 'Failed to send email. Check your SMTP settings and try again.',
+  });
+}
+
 export {
   createEmployeeVerificationRequest,
   getJobVerificationStatus,
@@ -684,4 +790,5 @@ export {
   getVerificationTags,
   getPublicVerificationByToken,
   respondToPublicVerification,
+  uploadPublicVerificationDocument,
 };

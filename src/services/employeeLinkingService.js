@@ -150,7 +150,19 @@ async function updateAccessRequestStatus(userId, requestId, status) {
     $or: [{ employeeId: userId }, { employeeUserId: userId }],
   });
   if (!request) throw ApiError.notFound('Access request not found');
-  if (normalizeAccessStatus(request.status) !== 'pending') {
+
+  const currentStatus = normalizeAccessStatus(request.status);
+
+  // Approving is only valid from a pending request.
+  if (status === 'approved' && currentStatus !== 'pending') {
+    throw ApiError.badRequest('Access request already processed');
+  }
+
+  // Rejecting a pending request declines it; rejecting an approved request
+  // revokes previously granted access ("Remove access"). Anything already
+  // rejected cannot be processed again.
+  const isRevoke = status === 'rejected' && currentStatus === 'approved';
+  if (status === 'rejected' && currentStatus !== 'pending' && !isRevoke) {
     throw ApiError.badRequest('Access request already processed');
   }
 
@@ -167,10 +179,12 @@ async function updateAccessRequestStatus(userId, requestId, status) {
     { status: status === 'approved' ? 'approved' : 'denied' },
   );
 
-  await writeAccessAuditFromEmployee(
-    request,
-    status === 'approved' ? 'access_request_approved' : 'access_request_rejected',
-  );
+  const auditAction = status === 'approved'
+    ? 'access_request_approved'
+    : isRevoke
+      ? 'access_request_revoked'
+      : 'access_request_rejected';
+  await writeAccessAuditFromEmployee(request, auditAction);
 
   return {
     id: request._id,
