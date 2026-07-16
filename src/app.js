@@ -14,6 +14,20 @@ import { notFoundHandler, errorHandler } from './middleware/errorHandler.js';
 const app = express();
 let dbConnectPromise = null;
 
+const allowedOrigins = env.corsOrigin
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const corsOptions = {
+  credentials: true,
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error(`CORS origin denied: ${origin}`));
+  },
+};
+
 async function ensureDbConnected() {
   if (mongoose.connection.readyState === 1) return;
 
@@ -29,7 +43,7 @@ async function ensureDbConnected() {
 }
 
 app.use(helmet());
-app.use(cors({ origin: env.corsOrigin, credentials: true }));
+app.use(cors(corsOptions));
 app.use(morgan(env.isDev ? 'dev' : 'combined'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
