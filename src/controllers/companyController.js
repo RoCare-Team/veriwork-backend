@@ -38,6 +38,11 @@ export async function getTeam(req, res) {
   res.json({ success: true, data });
 }
 
+export async function searchEmployees(req, res) {
+  const employees = await companyLinkingService.searchCompanyEmployees(req.user, req.query.q || '');
+  res.json({ success: true, data: { employees } });
+}
+
 export async function getWorkspace(req, res) {
   const data = await companyLinkingService.getCompanyWorkspace(req.user);
   res.json({ success: true, data });

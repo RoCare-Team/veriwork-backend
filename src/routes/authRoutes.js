@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { validate } from '../middleware/validate.js';
+import { authenticate } from '../middleware/auth.js';
 import {
   phoneSchema,
   otpVerifySchema,
@@ -10,6 +11,7 @@ import {
   enterpriseRegisterSchema,
   refreshTokenSchema,
   logoutSchema,
+  changePasswordSchema,
 } from '../validators/authValidators.js';
 import * as authController from '../controllers/authController.js';
 
@@ -39,5 +41,11 @@ router.post('/admin/login', validate(platformAdminLoginSchema), asyncHandler(aut
 router.post('/enterprise/register', validate(enterpriseRegisterSchema), asyncHandler(authController.enterpriseRegister));
 router.post('/refresh', validate(refreshTokenSchema), asyncHandler(authController.refresh));
 router.post('/logout', validate(logoutSchema), asyncHandler(authController.logout));
+router.post(
+  '/change-password',
+  authenticate,
+  validate(changePasswordSchema),
+  asyncHandler(authController.changePassword),
+);
 
 export default router;

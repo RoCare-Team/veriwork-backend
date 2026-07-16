@@ -48,14 +48,19 @@ async function findInvitationForEmployee(userId, invitationId) {
   return invitation;
 }
 
-function mapInvitation(invitation, companyName) {
+function mapInvitation(invitation, company) {
+  const companyName = typeof company === 'string' ? company : company?.name || '';
   return {
     id: invitation._id,
     invitationId: invitation._id,
     companyName,
+    companyIndustry: typeof company === 'object' ? company?.industry || '' : '',
+    companyCity: typeof company === 'object' ? company?.city || '' : '',
     department: invitation.department,
     designation: invitation.designation,
     status: invitation.status,
+    invitedAt: invitation.invitedAt || invitation.createdAt,
+    respondedAt: invitation.respondedAt || null,
     dashboardStatus: invitation.status === 'pending' ? 'Invitation Sent' : invitation.status,
   };
 }
@@ -69,10 +74,10 @@ export async function listEmployeeInvitations(userId) {
   }).sort({ createdAt: -1 });
 
   const companyIds = [...new Set(invitations.map((i) => i.companyId.toString()))];
-  const companies = await Company.find({ _id: { $in: companyIds } }).select('name');
-  const companyMap = new Map(companies.map((company) => [company._id.toString(), company.name]));
+  const companies = await Company.find({ _id: { $in: companyIds } }).select('name industry city');
+  const companyMap = new Map(companies.map((company) => [company._id.toString(), company]));
 
-  return invitations.map((invitation) => mapInvitation(invitation, companyMap.get(invitation.companyId.toString()) || ''));
+  return invitations.map((invitation) => mapInvitation(invitation, companyMap.get(invitation.companyId.toString())));
 }
 
 export async function acceptInvitation(userId, invitationId) {

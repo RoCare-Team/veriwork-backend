@@ -31,6 +31,7 @@ router.get('/workspace', asyncHandler(companyController.getWorkspace));
 router.get('/team', asyncHandler(companyController.getTeam));
 router.get('/team/:department', asyncHandler(companyController.getDepartmentTeam));
 router.get('/platform-companies/search', asyncHandler(companyController.searchRegisteredCompanies));
+router.get('/employees/search', asyncHandler(companyController.searchEmployees));
 router.get('/employees/:employeeId', asyncHandler(companyController.getEmployeeById));
 router.get('/employees/:employeeId/profile', asyncHandler(companyController.getEmployeeProfile));
 router.get('/employees/:employeeId/documents', asyncHandler(companyController.getEmployeeDocuments));

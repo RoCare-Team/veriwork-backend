@@ -25,6 +25,15 @@ export async function platformAdminLogin(req, res) {
   res.json({ success: true, data: result });
 }
 
+export async function changePassword(req, res) {
+  const result = await authService.changePassword(
+    req.user._id,
+    req.body.currentPassword,
+    req.body.newPassword,
+  );
+  res.json({ success: true, data: result });
+}
+
 export async function enterpriseRegister(req, res) {
   const result = await authService.enterpriseRegister(req.body);
   res.status(201).json({ success: true, data: result });

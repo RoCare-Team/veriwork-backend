@@ -92,29 +92,106 @@ async function resolveEmployee({ employeeEmail, employeeMobile, employeePagerloo
   return profile.userId;
 }
 
+/**
+ * Search employees already registered on PagerLook so a company can pick one to
+ * invite (by PagerLook ID, mobile, email, or name). Excludes employees already
+ * actively linked to the searching company. Contact details are masked.
+ */
+export async function searchCompanyEmployees(user, query) {
+  const companyId = requireCompanyId(user);
+  const q = (query || '').trim();
+  if (q.length < 2) return [];
+
+  const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const digits = q.replace(/\D/g, '');
+
+  // Only resolve on a COMPLETE identifier — an exact PagerLook ID, a full email, or
+  // a full (10-digit) mobile. Partial text / single names return nothing, so we never
+  // surface a list of loose matches.
+  const conditions = [];
+  if (q.includes('-')) {
+    // PagerLook ID, e.g. VW-8KG1-D5 — exact, case-insensitive.
+    conditions.push({ veriworkId: new RegExp(`^${escaped}$`, 'i') });
+  }
+  if (q.includes('@') && q.includes('.')) {
+    conditions.push({ email: q.toLowerCase() });
+  }
+  if (digits.length >= 10) {
+    // Match on the last 10 digits so stored "+91…" numbers still resolve.
+    conditions.push({ phone: new RegExp(`${digits.slice(-10)}$`) });
+  }
+
+  if (!conditions.length) return [];
+
+  const profiles = await EmployeeProfile.find({ $or: conditions })
+    .select('userId name email phone veriworkId role company photoUrl')
+    .limit(10);
+
+  if (!profiles.length) return [];
+
+  const userIds = profiles.map((p) => p.userId);
+  const linked = await CompanyEmployee.find({
+    companyId,
+    employeeId: { $in: userIds },
+    employmentStatus: 'active',
+  }).select('employeeId');
+  const linkedSet = new Set(linked.map((l) => l.employeeId.toString()));
+
+  const maskEmail = (email) => {
+    if (!email) return '';
+    const [name, domain] = email.split('@');
+    if (!domain) return email;
+    const head = name.slice(0, 2);
+    return `${head}${'*'.repeat(Math.max(1, name.length - 2))}@${domain}`;
+  };
+  const maskMobile = (phone) => {
+    if (!phone) return '';
+    const digits = phone.replace(/\D/g, '');
+    return digits.length <= 4 ? phone : `${'•'.repeat(digits.length - 4)}${digits.slice(-4)}`;
+  };
+
+  return profiles
+    .filter((p) => !linkedSet.has(p.userId.toString()))
+    .map((p) => ({
+      employeeId: p.userId,
+      name: p.name || '',
+      veriworkId: p.veriworkId || '',
+      role: p.role || '',
+      company: p.company || '',
+      photoUrl: p.photoUrl || '',
+      maskedEmail: maskEmail(p.email),
+      maskedMobile: maskMobile(p.phone),
+    }));
+}
+
 export async function inviteEmployee(user, payload) {
   const companyId = requireCompanyId(user);
   const employeeId = await resolveEmployee(payload);
   const isRegistered = Boolean(employeeId);
   const status = isRegistered ? 'pending' : 'pending_registration';
 
-  if (!isRegistered && !payload.employeeEmail) {
-    throw ApiError.badRequest('Employee email is required to invite an unregistered employee');
-  }
+  // Unregistered invites are delivered via a shareable registration link. An email
+  // is optional — if provided we also email the link, otherwise the company copies it.
 
-  const existingPending = await CompanyEmployeeInvitation.findOne({
-    companyId,
-    status: { $in: ['pending', 'pending_registration'] },
-    $or: [
-      ...(payload.employeeEmail ? [{ employeeEmail: payload.employeeEmail.toLowerCase() }] : []),
-      ...(payload.employeeMobile ? [{ employeeMobile: payload.employeeMobile }] : []),
-      ...(payload.employeePagerlookId ? [{ employeeVeriworkId: payload.employeePagerlookId }] : []),
-      ...(employeeId ? [{ employeeId }] : []),
-    ],
-  });
+  const dedupeConditions = [
+    ...(payload.employeeEmail ? [{ employeeEmail: payload.employeeEmail.toLowerCase() }] : []),
+    ...(payload.employeeMobile ? [{ employeeMobile: payload.employeeMobile }] : []),
+    ...(payload.employeePagerlookId ? [{ employeeVeriworkId: payload.employeePagerlookId }] : []),
+    ...(employeeId ? [{ employeeId }] : []),
+  ];
 
-  if (existingPending) {
-    throw ApiError.conflict('Pending invitation already exists for this employee');
+  // Only dedupe when we can identify the invitee. Pure link invites (name only)
+  // may be generated repeatedly — each produces a fresh shareable link.
+  if (dedupeConditions.length > 0) {
+    const existingPending = await CompanyEmployeeInvitation.findOne({
+      companyId,
+      status: { $in: ['pending', 'pending_registration'] },
+      $or: dedupeConditions,
+    });
+
+    if (existingPending) {
+      throw ApiError.conflict('Pending invitation already exists for this employee');
+    }
   }
 
   const registrationToken = isRegistered ? null : generateRegistrationToken();

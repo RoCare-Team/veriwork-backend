@@ -7,14 +7,8 @@ export const inviteEmployeeSchema = z.object({
   employeePagerlookId: z.string().min(3).optional(),
   department: z.string().min(1),
   designation: z.string().min(1),
-}).superRefine((data, ctx) => {
-  if (!data.employeeEmail && !data.employeeMobile && !data.employeePagerlookId) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'Provide at least one employee identifier (email, mobile, or PagerLook ID)',
-      path: ['employeeEmail'],
-    });
-  }
+  // No identifier required — a link-only invite (name + role) generates a
+  // shareable registration link the company can copy and send to a new employee.
 });
 
 export const companyAccessRequestSchema = z.object({

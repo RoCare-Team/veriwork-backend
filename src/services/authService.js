@@ -58,6 +58,28 @@ export async function employeeGoogleLogin(idToken) {
   return buildEmployeeAuthResponse(user, profile);
 }
 
+export async function changePassword(userId, currentPassword, newPassword) {
+  const user = await User.findById(userId);
+  if (!user) throw ApiError.notFound('User not found');
+  if (!user.passwordHash) {
+    throw ApiError.badRequest(
+      'Your account signs in with OTP or Google, so there is no password to change.',
+    );
+  }
+
+  const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+  if (!valid) throw ApiError.unauthorized('Current password is incorrect');
+
+  if (await bcrypt.compare(newPassword, user.passwordHash)) {
+    throw ApiError.badRequest('New password must be different from the current password');
+  }
+
+  user.passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+  await user.save();
+
+  return { message: 'Password updated successfully' };
+}
+
 export async function enterpriseLogin(email, password) {
   const user = await User.findOne({ email: email.toLowerCase(), role: 'enterprise_admin' });
   if (!user || !user.passwordHash) {

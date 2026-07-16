@@ -206,10 +206,15 @@ export async function sendInvitationNotifications({
       userId: invitation.employeeId,
       type: 'system',
       title: 'Company invitation received',
-      message: `${companyName} invited you to join ${invitation.department || 'their team'}`,
+      message: `${companyName} wants to add you to their workforce as ${invitation.designation || 'a team member'}${invitation.department ? ` in ${invitation.department}` : ''}. Open Invitations to accept or decline.`,
       company: companyName,
       status: 'pending',
-      metadata: { invitationId: invitation._id.toString() },
+      metadata: {
+        invitationId: invitation._id.toString(),
+        department: invitation.department || '',
+        designation: invitation.designation || '',
+        event: 'company_invitation',
+      },
     });
   }
 
