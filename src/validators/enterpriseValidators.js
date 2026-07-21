@@ -34,7 +34,17 @@ export const createJoinRequestSchema = z.object({
 });
 
 export const createQrSchema = z.object({
-  label: z.string().min(1),
+  label: z.string().trim().min(1, 'Campaign label is required').max(120),
+  department: z.string().trim().max(100).optional(),
+  designation: z.string().trim().max(100).optional(),
+});
+
+export const setQrActiveSchema = z.object({
+  isActive: z.boolean(),
+});
+
+export const applicationMessageSchema = z.object({
+  body: z.string().trim().min(1, 'Message cannot be empty').max(2000),
 });
 
 export const teamEmployeesQuerySchema = z.object({

@@ -5,6 +5,7 @@ import { JoinRequest } from '../models/JoinRequest.js';
 import { User } from '../models/User.js';
 import { ApiError } from '../utils/ApiError.js';
 import { getInitials } from '../utils/idGenerators.js';
+import { mapDocumentReviews } from './onboardingReviewService.js';
 
 function formatCompanyApplication(company, onboarding, adminUser) {
   return {
@@ -37,6 +38,7 @@ function formatCompanyApplication(company, onboarding, adminUser) {
       basicInfo: onboarding.basicInfo,
       registration: onboarding.registration,
       documents: Object.fromEntries(onboarding.documents || []),
+      documentReviews: mapDocumentReviews(onboarding),
       certified: onboarding.certified,
       rejectionReason: onboarding.rejectionReason || '',
       reviewedAt: onboarding.reviewedAt,

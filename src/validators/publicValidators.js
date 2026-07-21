@@ -1,5 +1,20 @@
 import { z } from 'zod';
 
+export const acceptCompanyUserInviteSchema = z.object({
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+});
+
+// Mirrors the Invite Employee form: mobile identifies them, email is optional
+// (the link is handed back for an immediate redirect rather than only emailed).
+export const qrJoinRequestSchema = z.object({
+  name: z.string().trim().min(2, 'Your name is required').max(120),
+  phone: z.string().trim().min(10, 'A 10-digit mobile number is required').max(20),
+  email: z.string().trim().email('Valid email is required').max(200).optional().or(z.literal('')),
+  role: z.string().trim().max(120).optional(),
+  department: z.string().trim().max(100).optional(),
+  joiningDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal('')),
+});
+
 export const publicProfileAccessRequestSchema = z.object({
   requesterName: z.string().trim().min(2, 'Name is required').max(120),
   requesterEmail: z.string().trim().email('Valid email is required').max(200),

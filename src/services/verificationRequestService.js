@@ -157,9 +157,13 @@ export async function createVerificationRequest(user, payload) {
     });
   }
 
-  const previousCompany = payload.targetCompanyId
-    ? await Company.findById(assertValidObjectId(payload.targetCompanyId, 'target company id'))
-    : await findPreviousCompanyByName(job.company, companyId);
+  // forceEmail: the requester looked at the auto-matched company and said "that's
+  // not them" — verify via the HR contacts on record instead of the platform.
+  const previousCompany = payload.forceEmail
+    ? null
+    : payload.targetCompanyId
+      ? await Company.findById(assertValidObjectId(payload.targetCompanyId, 'target company id'))
+      : await findPreviousCompanyByName(job.company, companyId);
 
   if (payload.targetCompanyId && !previousCompany) {
     throw ApiError.badRequest('Selected platform company not found');

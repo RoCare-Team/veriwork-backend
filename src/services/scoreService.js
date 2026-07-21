@@ -19,6 +19,26 @@ function getJobVerificationPoints(job) {
   return 0;
 }
 
+/** Points per completed education level — skippable at setup, earned when added. */
+export const EDUCATION_LEVEL_POINTS = 15;
+
+/** A level counts once its two identifying fields are filled. */
+export function countCompletedEducationLevels(education) {
+  if (!education) return 0;
+  const levels = [
+    ['board', 'school'], // class10
+    ['board', 'school'], // class12
+    ['degree', 'college'], // graduation
+  ];
+  const entries = [education.class10, education.class12, education.graduation];
+
+  return entries.reduce((count, level, i) => {
+    if (!level) return count;
+    const complete = levels[i].every((field) => level[field]?.trim());
+    return complete ? count + 1 : count;
+  }, 0);
+}
+
 export function calculateEmployeeScore(profile, jobs = []) {
   if (!profile) return SCORE_MIN;
 
@@ -27,6 +47,9 @@ export function calculateEmployeeScore(profile, jobs = []) {
   if (profile.profileSetupComplete) {
     score += VERIFICATION_LEVEL_WEIGHTS.profile_verified;
   }
+
+  // Education is optional, so it adds on top rather than gating anything.
+  score += countCompletedEducationLevels(profile.education) * EDUCATION_LEVEL_POINTS;
 
   const identityVerified = profile.aadhaarVerified && profile.biometricVerified;
   if (identityVerified) {

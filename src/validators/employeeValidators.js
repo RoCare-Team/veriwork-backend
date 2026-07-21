@@ -32,33 +32,66 @@ const passingYearField = z
 
 const percentageField = z.string().max(20).optional().or(z.literal(''));
 
-const class10EducationSchema = z.object({
-  board: z.string().min(1, '10th board is required').max(100),
-  school: z.string().min(1, '10th school is required').max(150),
-  passingYear: passingYearField,
-  percentage: percentageField,
-});
+/*
+ * Education is optional to submit — a user can skip it during setup and add it
+ * later to earn score. But a PARTIALLY filled level is rejected: half a record
+ * is worse than none, since it looks verified but isn't. So each level is
+ * either entirely empty or has its key fields.
+ */
+const optionalText = (max) => z.string().max(max).optional().or(z.literal(''));
 
-const class12EducationSchema = z.object({
-  board: z.string().min(1, '12th board is required').max(100),
-  school: z.string().min(1, '12th school is required').max(150),
-  stream: z.string().max(50).optional().or(z.literal('')),
-  passingYear: passingYearField,
-  percentage: percentageField,
-});
+function requireCompleteLevel(levelLabel, requiredFields) {
+  return (data, ctx) => {
+    if (!data) return;
+    const values = Object.values(data).map((v) => (typeof v === 'string' ? v.trim() : v));
+    const isEmpty = values.every((v) => !v);
+    if (isEmpty) return; // skipped entirely — allowed
 
-const graduationEducationSchema = z.object({
-  degree: z.string().min(1, 'Graduation degree is required').max(100),
-  college: z.string().min(1, 'College name is required').max(150),
-  university: z.string().max(150).optional().or(z.literal('')),
-  passingYear: passingYearField,
-  percentage: percentageField,
-});
+    for (const [field, label] of Object.entries(requiredFields)) {
+      if (!data[field]?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `${label} is required to save ${levelLabel}`,
+          path: [field],
+        });
+      }
+    }
+  };
+}
+
+const class10EducationSchema = z
+  .object({
+    board: optionalText(100),
+    school: optionalText(150),
+    passingYear: passingYearField.optional().or(z.literal('')),
+    percentage: percentageField,
+  })
+  .superRefine(requireCompleteLevel('Class 10', { board: 'Board', school: 'School name' }));
+
+const class12EducationSchema = z
+  .object({
+    board: optionalText(100),
+    school: optionalText(150),
+    stream: optionalText(50),
+    passingYear: passingYearField.optional().or(z.literal('')),
+    percentage: percentageField,
+  })
+  .superRefine(requireCompleteLevel('Class 12', { board: 'Board', school: 'School name' }));
+
+const graduationEducationSchema = z
+  .object({
+    degree: optionalText(100),
+    college: optionalText(150),
+    university: optionalText(150),
+    passingYear: passingYearField.optional().or(z.literal('')),
+    percentage: percentageField,
+  })
+  .superRefine(requireCompleteLevel('Graduation', { degree: 'Degree', college: 'College name' }));
 
 const educationSchema = z.object({
-  class10: class10EducationSchema,
-  class12: class12EducationSchema,
-  graduation: graduationEducationSchema,
+  class10: class10EducationSchema.optional(),
+  class12: class12EducationSchema.optional(),
+  graduation: graduationEducationSchema.optional(),
 });
 
 export const suggestionsQuerySchema = z.object({
@@ -99,7 +132,8 @@ export const setupProfileSchema = z
     currentAddress: z.string().min(1, 'Current address is required').max(300),
     permanentAddress: z.string().max(300).optional(),
     sameAsCurrentAddress: sameAddressField,
-    education: educationSchema,
+    // Skippable during setup — adding it later earns score.
+    education: educationSchema.optional(),
     invitationToken: z.string().min(10).optional(),
   })
   .superRefine((data, ctx) => {

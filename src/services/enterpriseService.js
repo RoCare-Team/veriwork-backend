@@ -1,4 +1,6 @@
+import { ActivityLog } from '../models/ActivityLog.js';
 import { Company } from '../models/Company.js';
+import { CompanyEmployee } from '../models/CompanyEmployee.js';
 import { CompanyOnboarding } from '../models/CompanyOnboarding.js';
 import { EmployeeProfile } from '../models/EmployeeProfile.js';
 import { JoinRequest } from '../models/JoinRequest.js';
@@ -70,6 +72,19 @@ export async function uploadOnboardingDocument(user, docType, file) {
 
   const stored = await storeUploadedFile(file, `enterprise/${docType}`);
   onboarding.documents.set(docType, stored.url);
+
+  // Replacing a rejected document clears its rejection — otherwise the company
+  // could never satisfy the "fix the rejected docs" gate on resubmit.
+  const existingReview = onboarding.documentReviews?.get?.(docType);
+  if (existingReview?.status === 'rejected') {
+    onboarding.documentReviews.set(docType, {
+      status: 'pending',
+      reason: '',
+      reviewedAt: null,
+      reviewedBy: null,
+    });
+  }
+
   await onboarding.save();
 
   return {
@@ -215,6 +230,36 @@ export async function updateJoinRequest(user, requestId, status) {
 
   request.status = status;
   await request.save();
+
+  // Approving is the onboarding step: a candidate who already has a PagerLook
+  // profile gets linked into the workforce right away. Candidates without one
+  // stay approved-but-unlinked until they register.
+  if (status === 'approved' && request.candidateUserId) {
+    const profile = await EmployeeProfile.findOne({ userId: request.candidateUserId }).select('name');
+    await CompanyEmployee.findOneAndUpdate(
+      { companyId, employeeId: request.candidateUserId },
+      {
+        $set: {
+          employeeName: profile?.name || request.name,
+          department: request.department || '',
+          designation: request.role || '',
+          employmentStatus: 'active',
+        },
+        $setOnInsert: { onboardingStage: 'incoming', joinedAt: new Date() },
+      },
+      { upsert: true, new: true },
+    );
+
+    await ActivityLog.create({
+      userId: request.candidateUserId,
+      type: 'system',
+      title: 'Join request approved',
+      message: `Your request to join has been approved. You have been added to the workforce.`,
+      status: 'info',
+      metadata: { joinRequestId: request._id.toString(), event: 'join_request_approved' },
+    });
+  }
+
   return request;
 }
 

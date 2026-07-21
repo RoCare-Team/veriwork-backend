@@ -1,4 +1,28 @@
 import * as adminService from '../services/adminService.js';
+import * as onboardingReviewService from '../services/onboardingReviewService.js';
+
+export async function reviewCompanyDocument(req, res) {
+  const data = await onboardingReviewService.reviewOnboardingDocument(
+    req.user._id,
+    req.params.id,
+    req.body,
+  );
+  res.json({ success: true, data });
+}
+
+export async function listCompanyMessages(req, res) {
+  const data = await onboardingReviewService.listOnboardingMessages(req.params.id, { asAdmin: true });
+  res.json({ success: true, data });
+}
+
+export async function postCompanyMessage(req, res) {
+  const data = await onboardingReviewService.postOnboardingMessage(req.params.id, {
+    body: req.body.body,
+    authorRole: 'admin',
+    user: req.user,
+  });
+  res.status(201).json({ success: true, data });
+}
 
 export async function getDashboard(req, res) {
   const stats = await adminService.getDashboardStats();

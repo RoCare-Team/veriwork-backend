@@ -2,6 +2,32 @@ import * as enterpriseService from '../services/enterpriseService.js';
 import * as teamService from '../services/teamService.js';
 import * as accessRequestService from '../services/accessRequestService.js';
 import * as insightsService from '../services/insightsService.js';
+import * as qrOnboardingService from '../services/qrOnboardingService.js';
+import * as onboardingReviewService from '../services/onboardingReviewService.js';
+
+export async function getApplicationStatus(req, res) {
+  const data = await onboardingReviewService.getMyApplicationStatus(req.user);
+  res.json({ success: true, data });
+}
+
+export async function resubmitApplication(req, res) {
+  const data = await onboardingReviewService.resubmitApplication(req.user);
+  res.json({ success: true, data });
+}
+
+export async function listApplicationMessages(req, res) {
+  const data = await onboardingReviewService.listOnboardingMessages(req.user.companyId);
+  res.json({ success: true, data });
+}
+
+export async function postApplicationMessage(req, res) {
+  const data = await onboardingReviewService.postOnboardingMessage(req.user.companyId, {
+    body: req.body.body,
+    authorRole: 'company',
+    user: req.user,
+  });
+  res.status(201).json({ success: true, data });
+}
 
 export async function getOnboarding(req, res) {
   const data = await enterpriseService.getOnboarding(req.user);
@@ -59,13 +85,23 @@ export async function updateJoinRequest(req, res) {
 }
 
 export async function listQrCodes(req, res) {
-  const codes = await enterpriseService.listQrCodes(req.user);
+  const codes = await qrOnboardingService.listQrCodes(req.user);
   res.json({ success: true, data: codes });
 }
 
 export async function createQrCode(req, res) {
-  const code = await enterpriseService.createQrCode(req.user, req.body.label);
+  const code = await qrOnboardingService.createQrCode(req.user, req.body);
   res.status(201).json({ success: true, data: code });
+}
+
+export async function setQrActive(req, res) {
+  const data = await qrOnboardingService.setQrActive(req.user, req.params.id, req.body.isActive);
+  res.json({ success: true, data });
+}
+
+export async function deleteQrCode(req, res) {
+  const data = await qrOnboardingService.deleteQrCode(req.user, req.params.id);
+  res.json({ success: true, data });
 }
 
 export async function getDepartments(req, res) {

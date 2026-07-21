@@ -11,6 +11,8 @@ import {
   updateJoinRequestSchema,
   createJoinRequestSchema,
   createQrSchema,
+  setQrActiveSchema,
+  applicationMessageSchema,
   teamEmployeesQuerySchema,
   accessRequestsQuerySchema,
   createAccessRequestSchema,
@@ -30,6 +32,17 @@ router.post(
   asyncHandler(enterpriseController.uploadDocument),
 );
 router.post('/onboarding/submit', validate(submitOnboardingSchema), asyncHandler(enterpriseController.submitOnboarding));
+
+// Application review status + thread. Deliberately BEFORE requireCompanyApproved:
+// these exist precisely for companies that are not approved yet.
+router.get('/application/status', asyncHandler(enterpriseController.getApplicationStatus));
+router.post('/application/resubmit', asyncHandler(enterpriseController.resubmitApplication));
+router.get('/application/messages', asyncHandler(enterpriseController.listApplicationMessages));
+router.post(
+  '/application/messages',
+  validate(applicationMessageSchema),
+  asyncHandler(enterpriseController.postApplicationMessage),
+);
 
 router.use(requireCompanyApproved);
 
@@ -68,5 +81,11 @@ router.patch(
 
 router.get('/qr-onboarding', asyncHandler(enterpriseController.listQrCodes));
 router.post('/qr-onboarding', validate(createQrSchema), asyncHandler(enterpriseController.createQrCode));
+router.patch(
+  '/qr-onboarding/:id/active',
+  validate(setQrActiveSchema),
+  asyncHandler(enterpriseController.setQrActive),
+);
+router.delete('/qr-onboarding/:id', asyncHandler(enterpriseController.deleteQrCode));
 
 export default router;

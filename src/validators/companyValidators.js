@@ -26,6 +26,9 @@ export const createVerificationRequestSchema = z.object({
   employeeId: z.string().min(1),
   jobExperienceId: z.string().min(1),
   targetCompanyId: z.string().optional(),
+  // Skip platform routing even if the previous employer name matches a
+  // registered company — send to the HR contacts on record instead.
+  forceEmail: z.boolean().optional(),
   hrEmail: z.string().email().optional(),
   managerEmail: z.string().email().optional(),
   hrName: z.string().optional(),
@@ -101,4 +104,59 @@ export const smtpSettingsSchema = z.object({
 
 export const smtpTestSchema = z.object({
   to: z.string().trim().email('Valid recipient email is required').max(200).optional(),
+});
+
+const companyRoleEnum = z.enum(['owner', 'admin', 'hr_manager', 'recruiter', 'viewer']);
+const permissionLevel = z.enum(['none', 'view', 'manage']);
+
+// A role is either a preset key or a custom role id — exactly one of them.
+const roleSelection = {
+  companyRole: companyRoleEnum.optional(),
+  companyRoleId: z.string().min(1).optional(),
+};
+
+function requireOneRole(data, ctx) {
+  if (!data.companyRole && !data.companyRoleId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Select a role',
+      path: ['companyRole'],
+    });
+  }
+}
+
+export const inviteCompanyUserSchema = z
+  .object({
+    email: z.string().trim().email('Valid email is required').max(200),
+    name: z.string().trim().max(120).optional(),
+    ...roleSelection,
+  })
+  .superRefine(requireOneRole);
+
+export const createCompanyUserSchema = z
+  .object({
+    email: z.string().trim().email('Valid email is required').max(200),
+    password: z.string().min(8, 'Password must be at least 8 characters').max(200),
+    ...roleSelection,
+  })
+  .superRefine(requireOneRole);
+
+export const updateCompanyUserRoleSchema = z
+  .object(roleSelection)
+  .superRefine(requireOneRole);
+
+export const resetCompanyUserPasswordSchema = z.object({
+  password: z.string().min(8, 'Password must be at least 8 characters').max(200),
+});
+
+export const createCompanyRoleSchema = z.object({
+  name: z.string().trim().min(2, 'Role name is required').max(60),
+  description: z.string().trim().max(200).optional(),
+  permissions: z.record(z.string(), permissionLevel).default({}),
+});
+
+export const updateCompanyRoleSchema = z.object({
+  name: z.string().trim().min(2).max(60).optional(),
+  description: z.string().trim().max(200).optional(),
+  permissions: z.record(z.string(), permissionLevel).optional(),
 });

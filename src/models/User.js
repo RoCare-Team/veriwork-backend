@@ -34,6 +34,21 @@ const userSchema = new mongoose.Schema(
       enum: ['employee', 'enterprise_admin', 'platform_admin'],
       required: true,
     },
+    // Company-scoped role — decides what an enterprise_admin can see/do inside the
+    // portal. Ignored for employees / platform admins. See utils/permissions.js.
+    // A preset role key; ignored when companyRoleId points at a custom role.
+    companyRole: {
+      type: String,
+      enum: ['owner', 'admin', 'hr_manager', 'recruiter', 'viewer', null],
+      default: null,
+    },
+    // Set when the user is on a company-defined custom role. Takes precedence
+    // over `companyRole`.
+    companyRoleId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'CompanyRole',
+      default: null,
+    },
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Company',

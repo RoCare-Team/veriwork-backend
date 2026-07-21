@@ -2,6 +2,8 @@ import * as companyLinkingService from '../services/companyLinkingService.js';
 import * as verificationRequestService from '../services/verificationRequestService.js';
 import * as workforceOnboardingService from '../services/workforceOnboardingService.js';
 import * as smtpSettingsService from '../services/smtpSettingsService.js';
+import * as companyUsersService from '../services/companyUsersService.js';
+import * as rolePermissionService from '../services/rolePermissionService.js';
 import { searchPlatformCompanies } from '../services/employmentVerificationService.js';
 import { listAccessRequestTypes as getAccessRequestTypeOptions } from '../services/accessRequestTypesService.js';
 
@@ -190,6 +192,70 @@ export async function assignEmployeeOnboarding(req, res) {
     req.params.employeeId,
     req.body,
   );
+  res.json({ success: true, data });
+}
+
+export async function getMyPermissions(req, res) {
+  const data = await companyUsersService.getMyPermissions(req.user);
+  res.json({ success: true, data });
+}
+
+export async function listRoles(req, res) {
+  const data = await rolePermissionService.listRoles(req.user);
+  res.json({ success: true, data });
+}
+
+export async function createRole(req, res) {
+  const data = await rolePermissionService.createRole(req.user, req.body);
+  res.status(201).json({ success: true, data });
+}
+
+export async function updateRole(req, res) {
+  const data = await rolePermissionService.updateRole(req.user, req.params.roleId, req.body);
+  res.json({ success: true, data });
+}
+
+export async function deleteRole(req, res) {
+  const data = await rolePermissionService.deleteRole(req.user, req.params.roleId);
+  res.json({ success: true, data });
+}
+
+export async function listCompanyUsers(req, res) {
+  const data = await companyUsersService.listCompanyUsers(req.user);
+  res.json({ success: true, data });
+}
+
+export async function createCompanyUser(req, res) {
+  const data = await companyUsersService.createCompanyUser(req.user, req.body);
+  res.status(201).json({ success: true, data });
+}
+
+export async function resetCompanyUserPassword(req, res) {
+  const data = await companyUsersService.resetCompanyUserPassword(
+    req.user,
+    req.params.userId,
+    req.body.password,
+  );
+  res.json({ success: true, data });
+}
+
+export async function inviteCompanyUser(req, res) {
+  const data = await companyUsersService.inviteCompanyUser(req.user, req.body);
+  res.status(201).json({ success: true, data });
+}
+
+export async function revokeCompanyUserInvite(req, res) {
+  const data = await companyUsersService.revokeCompanyUserInvite(req.user, req.params.inviteId);
+  res.json({ success: true, data });
+}
+
+export async function updateCompanyUserRole(req, res) {
+  const data = await companyUsersService.updateCompanyUserRole(req.user, req.params.userId, req.body);
+  res.json({ success: true, data });
+}
+
+export async function removeCompanyUser(req, res) {
+  const data = await companyUsersService.removeCompanyUser(req.user, req.params.userId);
   res.json({ success: true, data });
 }
 

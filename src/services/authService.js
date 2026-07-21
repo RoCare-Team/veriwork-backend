@@ -202,6 +202,8 @@ export async function enterpriseRegister({
     email: normalizedEmail,
     passwordHash,
     role: 'enterprise_admin',
+    // Whoever registers the company owns it.
+    companyRole: 'owner',
     companyId: company._id,
   });
 

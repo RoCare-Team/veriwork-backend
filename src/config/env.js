@@ -78,7 +78,12 @@ export const env = Object.freeze({
     enabled: Boolean(process.env.GOOGLE_CLIENT_ID),
   },
 
-  frontendUrl: process.env.FRONTEND_URL || process.env.CORS_ORIGIN || "http://localhost:5173",
+  // CORS_ORIGIN may be a comma-separated allow-list, but a link needs exactly one
+  // origin — take the first and drop any trailing slash.
+  frontendUrl: (process.env.FRONTEND_URL || process.env.CORS_ORIGIN || "http://localhost:5173")
+    .split(",")[0]
+    .trim()
+    .replace(/\/$/, ""),
 
   // Key used to encrypt sensitive at-rest secrets (e.g. per-company SMTP passwords).
   encryptionKey:
@@ -86,13 +91,30 @@ export const env = Object.freeze({
     process.env.JWT_ACCESS_SECRET ||
     devDefaults.JWT_ACCESS_SECRET,
 
+  // All outgoing transactional email is driven entirely by these env vars, so the
+  // provider (Gmail today, Amazon SES later) can be swapped without code changes.
   email: {
     enabled: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
-    from: process.env.EMAIL_FROM || "PagerLook <noreply@pagerlook.com>",
+    // From-address. SMTP_FROM is the canonical name; EMAIL_FROM kept as a fallback.
+    // If neither carries a display name, we still send a clean "PagerLook <user>".
+    from:
+      process.env.SMTP_FROM ||
+      process.env.EMAIL_FROM ||
+      (process.env.SMTP_USER
+        ? `PagerLook <${process.env.SMTP_USER}>`
+        : "PagerLook <noreply@pagerlook.com>"),
+    replyTo: process.env.SMTP_REPLY_TO || process.env.EMAIL_REPLY_TO || "",
     smtpHost: process.env.SMTP_HOST || "",
     smtpPort: Number(process.env.SMTP_PORT) || 587,
     smtpSecure: process.env.SMTP_SECURE === "true",
     smtpUser: process.env.SMTP_USER || "",
     smtpPass: process.env.SMTP_PASS || "",
+
+    // Branding for the shared HTML template — also env-driven, no hardcoding.
+    brandName: process.env.EMAIL_BRAND_NAME || "PagerLook",
+    brandTagline: process.env.EMAIL_BRAND_TAGLINE || "Verify. Trust. Grow.",
+    brandColor: process.env.EMAIL_BRAND_COLOR || "#1e3a8a",
+    brandLogoUrl: process.env.EMAIL_LOGO_URL || "",
+    supportEmail: process.env.EMAIL_SUPPORT || "support@pagerlook.com",
   },
 });

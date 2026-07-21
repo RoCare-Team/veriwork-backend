@@ -26,10 +26,17 @@ const companyEmployeeInvitationSchema = new mongoose.Schema(
       default: 'pending',
       index: true,
     },
+    // Null for QR-initiated invites — nobody on the company side clicked invite,
+    // the candidate scanned a code the company published.
     invitedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
+      default: null,
+    },
+    source: {
+      type: String,
+      enum: ['manual', 'qr'],
+      default: 'manual',
     },
     invitedAt: { type: Date, default: Date.now },
     respondedAt: { type: Date, default: null },

@@ -158,24 +158,14 @@ export function buildProfileResponse(profile, jobs = []) {
   };
 }
 
-function isEducationComplete(education) {
-  const class10 = education?.class10;
-  const class12 = education?.class12;
-  const graduation = education?.graduation;
-
-  return Boolean(
-    class10?.board?.trim()
-    && class10?.school?.trim()
-    && class10?.passingYear?.trim()
-    && class12?.board?.trim()
-    && class12?.school?.trim()
-    && class12?.passingYear?.trim()
-    && graduation?.degree?.trim()
-    && graduation?.college?.trim()
-    && graduation?.passingYear?.trim(),
-  );
-}
-
+/**
+ * The profile step counts as done once the identifying details are present.
+ *
+ * Education is deliberately NOT required here — it is an optional, score-bearing
+ * step. Including it meant a user who skipped education stayed permanently
+ * "profile incomplete", which locked the rest of the portal behind a step they
+ * were told they could skip.
+ */
 function isProfileFieldsComplete(profile) {
   return Boolean(
     profile.name?.trim()
@@ -188,8 +178,7 @@ function isProfileFieldsComplete(profile) {
     && profile.totalExperience?.trim()
     && profile.currentCity?.trim()
     && profile.currentAddress?.trim()
-    && profile.permanentAddress?.trim()
-    && isEducationComplete(profile.education),
+    && profile.permanentAddress?.trim(),
   );
 }
 

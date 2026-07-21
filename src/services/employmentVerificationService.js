@@ -57,6 +57,17 @@ export function normalizeCompanyName(name) {
     .trim();
 }
 
+/**
+ * Resolve a past employer to a registered company — used to AUTO-ROUTE a
+ * verification request to that company's dashboard.
+ *
+ * Deliberately strict: exact name, or exact match once legal suffixes are
+ * normalised away. A loose "contains" match used to be allowed here, but it
+ * matched "Wipro technology" -> "Wipro Tech" and "Tata Consultancy Service" ->
+ * "Tata", i.e. it would send one person's employment data to an unrelated
+ * company. Fuzzy matching still exists in `searchPlatformCompanies`, where a
+ * human picks the company instead of us guessing.
+ */
 export async function findPreviousCompanyByName(companyName, excludeCompanyId = null) {
   if (!companyName?.trim()) return null;
 
@@ -76,13 +87,6 @@ export async function findPreviousCompanyByName(companyName, excludeCompanyId = 
 
   const exactNormalized = companies.find((c) => normalizeCompanyName(c.name) === normalizedInput);
   if (exactNormalized) return Company.findById(exactNormalized._id);
-
-  const containsMatch = companies.find((c) => {
-    const n = normalizeCompanyName(c.name);
-    if (n.length < 2 || normalizedInput.length < 2) return false;
-    return n.includes(normalizedInput) || normalizedInput.includes(n);
-  });
-  if (containsMatch) return Company.findById(containsMatch._id);
 
   return null;
 }
