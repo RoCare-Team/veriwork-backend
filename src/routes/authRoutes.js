@@ -12,6 +12,8 @@ import {
   refreshTokenSchema,
   logoutSchema,
   changePasswordSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
 } from '../validators/authValidators.js';
 import * as authController from '../controllers/authController.js';
 
@@ -39,6 +41,8 @@ router.post('/employee/google', validate(employeeGoogleSchema), asyncHandler(aut
 router.post('/enterprise/login', validate(enterpriseLoginSchema), asyncHandler(authController.enterpriseLogin));
 router.post('/admin/login', validate(platformAdminLoginSchema), asyncHandler(authController.platformAdminLogin));
 router.post('/enterprise/register', validate(enterpriseRegisterSchema), asyncHandler(authController.enterpriseRegister));
+router.post('/forgot-password', validate(forgotPasswordSchema), asyncHandler(authController.forgotPassword));
+router.post('/reset-password', validate(resetPasswordSchema), asyncHandler(authController.resetPassword));
 router.post('/refresh', validate(refreshTokenSchema), asyncHandler(authController.refresh));
 router.post('/logout', validate(logoutSchema), asyncHandler(authController.logout));
 router.post(

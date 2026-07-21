@@ -34,6 +34,16 @@ export async function changePassword(req, res) {
   res.json({ success: true, data: result });
 }
 
+export async function forgotPassword(req, res) {
+  const result = await authService.requestPasswordReset(req.body.email);
+  res.json({ success: true, data: result });
+}
+
+export async function resetPassword(req, res) {
+  const result = await authService.resetPassword(req.body.token, req.body.newPassword);
+  res.json({ success: true, data: result });
+}
+
 export async function enterpriseRegister(req, res) {
   const result = await authService.enterpriseRegister(req.body);
   res.status(201).json({ success: true, data: result });

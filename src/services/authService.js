@@ -1,9 +1,12 @@
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { User } from '../models/User.js';
 import { Company } from '../models/Company.js';
 import { CompanyOnboarding } from '../models/CompanyOnboarding.js';
 import { ApiError } from '../utils/ApiError.js';
+import { env } from '../config/env.js';
 import { sendOtp, verifyOtp } from './otpService.js';
+import { sendPasswordResetEmail } from './emailService.js';
 import {
   buildAuthEmployeePayload,
   getJobsForUser,
@@ -78,6 +81,66 @@ export async function changePassword(userId, currentPassword, newPassword) {
   await user.save();
 
   return { message: 'Password updated successfully' };
+}
+
+const RESET_TOKEN_TTL_MIN = 60;
+
+/**
+ * Start a password reset. Always returns the same generic message so the
+ * endpoint can't be used to discover which emails have accounts. Only
+ * password-based accounts (enterprise / company / admin) can reset — OTP and
+ * Google accounts have no password.
+ */
+export async function requestPasswordReset(email) {
+  const normalizedEmail = String(email || '').toLowerCase().trim();
+  const genericResponse = {
+    message: 'If an account exists for that email, a password reset link has been sent.',
+  };
+  if (!normalizedEmail) return genericResponse;
+
+  const user = await User.findOne({ email: normalizedEmail });
+  if (!user || !user.passwordHash) return genericResponse;
+
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  user.resetPasswordTokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+  user.resetPasswordExpires = new Date(Date.now() + RESET_TOKEN_TTL_MIN * 60 * 1000);
+  await user.save();
+
+  const resetLink = `${env.frontendUrl.replace(/\/$/, '')}/reset-password?token=${rawToken}`;
+  await sendPasswordResetEmail({ to: user.email, resetLink, expiresMinutes: RESET_TOKEN_TTL_MIN });
+
+  return genericResponse;
+}
+
+/**
+ * Complete a password reset with the emailed token. Invalidates all existing
+ * sessions afterwards so a leaked session can't outlive the reset.
+ */
+export async function resetPassword(token, newPassword) {
+  const rawToken = String(token || '').trim();
+  if (!rawToken) throw ApiError.badRequest('Reset token is required');
+
+  const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+  const user = await User.findOne({
+    resetPasswordTokenHash: tokenHash,
+    resetPasswordExpires: { $gt: new Date() },
+  });
+  if (!user) {
+    throw ApiError.badRequest('This reset link is invalid or has expired. Request a new one.');
+  }
+
+  if (user.passwordHash && (await bcrypt.compare(newPassword, user.passwordHash))) {
+    throw ApiError.badRequest('New password must be different from your current password');
+  }
+
+  user.passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+  user.resetPasswordTokenHash = null;
+  user.resetPasswordExpires = null;
+  await user.save();
+
+  await revokeAllUserTokens(user._id);
+
+  return { message: 'Your password has been reset. You can now sign in with your new password.' };
 }
 
 export async function enterpriseLogin(email, password) {

@@ -81,7 +81,15 @@ export function getDecryptedSmtpConfig(owner) {
   if (!smtp || !smtp.configured || !smtp.host || !smtp.username || !smtp.passwordEnc) {
     return null;
   }
-  const password = decryptSecret(smtp.passwordEnc);
+  // Decrypting can throw if the stored secret was encrypted under a different
+  // ENCRYPTION_KEY. Treat that as "no per-company SMTP" so the send falls back
+  // to the global account instead of crashing the whole email dispatch.
+  let password = null;
+  try {
+    password = decryptSecret(smtp.passwordEnc);
+  } catch {
+    password = null;
+  }
   if (!password) return null;
 
   const senderEmail = smtp.senderEmail || ownerDefaultEmail(owner);

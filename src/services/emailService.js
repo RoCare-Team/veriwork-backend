@@ -30,8 +30,18 @@ async function loadNodemailer() {
 }
 
 async function getTransporter() {
-  if (!env.email.enabled) return null;
+  if (!env.email.enabled) {
+    if (!getTransporter._warned) {
+      getTransporter._warned = true;
+      console.warn(
+        '[email] Global SMTP is DISABLED — SMTP_HOST/SMTP_USER/SMTP_PASS not all set in .env. ' +
+          'Emails will run in mock mode until configured (then restart).',
+      );
+    }
+    return null;
+  }
   if (!transporterPromise) {
+    console.log(`[email] Global SMTP enabled → host=${env.email.smtpHost} port=${env.email.smtpPort} secure=${env.email.smtpSecure} user=${env.email.smtpUser}`);
     transporterPromise = (async () => {
       const nodemailer = await loadNodemailer();
       if (!nodemailer) return null;
@@ -43,6 +53,12 @@ async function getTransporter() {
           user: env.email.smtpUser,
           pass: env.email.smtpPass,
         },
+        // Shared hosts (e.g. GoDaddy/cPanel) cap concurrent SMTP connections and
+        // will reply "421 Too many concurrent connections" if we open several at
+        // once. Pool over a small, reused set of connections and queue the rest.
+        pool: true,
+        maxConnections: 2,
+        maxMessages: 50,
       });
     })();
   }
@@ -201,25 +217,43 @@ function renderEmail({ heading, preheader = '', bodyHtml = '', cta, footerNote =
  * @param {string[]} [opts.logLinks] Extra links to print in mock mode.
  */
 async function sendEmail({ to, subject, html, text, companySmtp = null, category = 'email', logLinks = [] }) {
-  const { transport, from } = await resolveTransport(companySmtp);
-
-  if (!transport) {
-    console.log(`[email:mock] ${category}`);
-    console.log(`  To: ${to}`);
-    console.log(`  Subject: ${subject}`);
-    for (const link of logLinks) console.log(`  Link: ${link}`);
-    return { sent: false, mock: true };
-  }
-
-  try {
+  const deliver = async (transport, from, via) => {
     const message = { from, to, subject, text, html };
     if (env.email.replyTo) message.replyTo = env.email.replyTo;
     await transport.sendMail(message);
+    console.log(`[email] sent "${category}" to ${to} via ${via}`);
     return { sent: true, mock: false };
-  } catch (err) {
-    console.error(`[email] Failed to send "${category}" to ${to}:`, err.message);
-    return { sent: false, mock: false, error: err.message };
+  };
+
+  const primary = await resolveTransport(companySmtp);
+
+  // Try the requested transport first (per-company if supplied, else global env).
+  if (primary.transport) {
+    try {
+      return await deliver(primary.transport, primary.from, companySmtp ? 'company SMTP' : 'global SMTP');
+    } catch (err) {
+      console.error(`[email] "${category}" to ${to} via ${companySmtp ? 'company SMTP' : 'global SMTP'} failed: ${err.message}`);
+      // A broken per-company config must not block delivery — fall back to the
+      // platform's own global SMTP account (the one that actually works).
+      if (companySmtp) {
+        const globalTransport = await getTransporter();
+        if (globalTransport) {
+          try {
+            return await deliver(globalTransport, env.email.from, 'global SMTP (fallback)');
+          } catch (fallbackErr) {
+            console.error(`[email] "${category}" to ${to} global fallback failed: ${fallbackErr.message}`);
+            return { sent: false, mock: false, error: fallbackErr.message };
+          }
+        }
+      }
+      return { sent: false, mock: false, error: err.message };
+    }
   }
+
+  // No usable transport anywhere → mock (SMTP not configured).
+  console.log(`[email:mock] ${category} → ${to} :: ${subject}  (SMTP not configured — set SMTP_* in .env)`);
+  for (const link of logLinks) console.log(`  Link: ${link}`);
+  return { sent: false, mock: true };
 }
 
 /**
@@ -247,6 +281,34 @@ export async function sendBrandedEmail({
     companySmtp,
     category,
     logLinks: cta?.url ? [cta.url] : [],
+  });
+}
+
+/**
+ * Password reset email — sent to password-based accounts (enterprise/company/admin).
+ */
+export async function sendPasswordResetEmail({ to, resetLink, expiresMinutes = 60 }) {
+  const subject = 'Reset your PagerLook password';
+  const bodyHtml = `
+    <p>Hello,</p>
+    <p>We received a request to reset the password for your PagerLook account. Click the button below to choose a new password.</p>
+    <p>If you didn't request this, you can safely ignore this email — your password won't change.</p>
+  `;
+  const text = `Reset your PagerLook password: ${resetLink} (link expires in ${expiresMinutes} minutes)`;
+
+  return sendEmail({
+    to,
+    subject,
+    html: renderEmail({
+      heading: 'Reset your password',
+      preheader: subject,
+      bodyHtml,
+      cta: { label: 'Reset password', url: resetLink },
+      footerNote: `This link expires in ${expiresMinutes} minutes. If the button doesn't work, paste this into your browser:<br/>${resetLink}`,
+    }),
+    text,
+    category: 'Password reset',
+    logLinks: [resetLink],
   });
 }
 
