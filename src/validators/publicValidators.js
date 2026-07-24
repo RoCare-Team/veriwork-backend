@@ -38,6 +38,13 @@ export const publicVerificationRespondSchema = z.object({
   uanNumber: z.string().max(12).optional(),
   pfNumber: z.string().max(30).optional(),
   esiNumber: z.string().max(20).optional(),
+  // Salary the verifier confirms, plus the two explicit decisions. These MUST
+  // be declared here — Zod strips unknown keys, so omitting them silently drops
+  // the verifier's answers before the service ever sees them.
+  monthlyInHandSalary: z.string().max(30).optional(),
+  yearlyPackage: z.string().max(30).optional(),
+  salaryVerificationStatus: z.enum(['verified', 'unverified', '']).optional(),
+  employmentVerificationStatus: z.enum(['verified', 'unverified', '']).optional(),
   // Structured HR verification form
   reportingManager: z.string().max(120).optional(),
   performanceRating: z.enum(['excellent', 'good', 'average', 'below_average', 'poor', '']).optional(),

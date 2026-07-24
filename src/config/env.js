@@ -110,6 +110,20 @@ export const env = Object.freeze({
     smtpUser: process.env.SMTP_USER || "",
     smtpPass: process.env.SMTP_PASS || "",
 
+    // Dedicated sender for employment-verification emails. Same server as the
+    // global SMTP (host/port/secure inherited); only the mailbox differs so
+    // verification mail comes from verification@pagerlook.com. Optional — falls
+    // back to the global sender when not configured.
+    verification: {
+      user: process.env.VERIFICATION_SMTP_USER || "",
+      pass: process.env.VERIFICATION_SMTP_PASS || "",
+      from:
+        process.env.VERIFICATION_SMTP_FROM ||
+        (process.env.VERIFICATION_SMTP_USER
+          ? `PagerLook Verification <${process.env.VERIFICATION_SMTP_USER}>`
+          : ""),
+    },
+
     // Branding for the shared HTML template — also env-driven, no hardcoding.
     brandName: process.env.EMAIL_BRAND_NAME || "PagerLook",
     brandTagline: process.env.EMAIL_BRAND_TAGLINE || "Verify. Trust. Grow.",

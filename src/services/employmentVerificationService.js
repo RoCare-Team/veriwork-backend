@@ -310,6 +310,7 @@ export async function applyVerificationResult(job, result, {
     const statutoryFields = [
       'employeeCode', 'department', 'workLocation', 'uanNumber', 'pfNumber', 'esiNumber',
       'companyPan', 'companyCin', 'companyGst', 'lastDrawnSalary', 'managerName',
+      'monthlyInHandSalary', 'yearlyPackage',
     ];
     for (const field of statutoryFields) {
       if (employmentDetails[field]) job[field] = employmentDetails[field];
@@ -368,6 +369,10 @@ export function buildEmploymentDetailsFromPayload(payload = {}, workedHere = tru
     uanNumber: payload.uanNumber || '',
     pfNumber: payload.pfNumber || '',
     esiNumber: payload.esiNumber || '',
+    monthlyInHandSalary: payload.monthlyInHandSalary || '',
+    yearlyPackage: payload.yearlyPackage || '',
+    salaryVerificationStatus: payload.salaryVerificationStatus || '',
+    employmentVerificationStatus: payload.employmentVerificationStatus || '',
     reportingManager: payload.reportingManager || '',
     performanceRating: payload.performanceRating || '',
     behaviorRemarks: payload.behaviorRemarks || '',
@@ -442,23 +447,30 @@ export async function sendVerificationEmails(request, job, employeeProfile) {
   // EMPLOYEE for self-initiated requests. Falls back to global env SMTP / mock.
   let companySmtp = null;
   let requestingCompanyName = '';
+  // Always look up the employee's own email so we can CC them on the request.
+  const empProfile = await EmployeeProfile.findOne({ userId: request.employeeId }).select('email name');
   if (request.requestingCompanyId) {
     const company = await Company.findById(request.requestingCompanyId);
     if (company) {
       requestingCompanyName = company.name || '';
       companySmtp = getDecryptedSmtpConfig(company);
     }
-  } else {
+  } else if (empProfile) {
     // Employee-initiated: send from the employee's own mailbox if configured.
-    const profile = await EmployeeProfile.findOne({ userId: request.employeeId });
-    if (profile) companySmtp = getDecryptedSmtpConfig(profile);
+    companySmtp = getDecryptedSmtpConfig(empProfile);
   }
+
+  // CC the employee — but never CC an address that's already a recipient.
+  const employeeEmail = (empProfile?.email || '').trim();
+  const recipientSet = new Set(recipients.map((r) => r.toLowerCase()));
+  const ccEmployee =
+    employeeEmail && !recipientSet.has(employeeEmail.toLowerCase()) ? employeeEmail : null;
 
   const results = await Promise.all(
     recipients.map((to) => sendEmploymentVerificationEmail({
       to,
       hrName: request.hrName || '',
-      employeeName: employeeProfile?.name || 'Employee',
+      employeeName: employeeProfile?.name || empProfile?.name || 'Employee',
       previousCompanyName: job.company,
       requestingCompanyName,
       designation: job.title,
@@ -469,6 +481,7 @@ export async function sendVerificationEmails(request, job, employeeProfile) {
       isPlatformCompany: request.verificationChannel === 'platform',
       initiatedBy: request.initiatedBy,
       companySmtp,
+      cc: ccEmployee,
     })),
   );
 
@@ -769,6 +782,19 @@ export async function getPublicVerificationByToken(token) {
     uanNumber: job?.uanNumber || '',
     pfNumber: job?.pfNumber || '',
     esiNumber: job?.esiNumber || '',
+    // What the employee declared — HR confirms or corrects these.
+    monthlyInHandSalary: job?.monthlyInHandSalary || '',
+    yearlyPackage: job?.yearlyPackage || '',
+    lastDrawnSalary: job?.lastDrawnSalary || '',
+    // Role progression at this company, for the verifier to confirm.
+    positions: (job?.positions || []).map((p) => ({
+      title: p.title,
+      fromDate: p.fromDate || '',
+      toDate: p.toDate || '',
+      isCurrent: Boolean(p.isCurrent),
+      yearlyPackage: p.yearlyPackage || '',
+      monthlyInHandSalary: p.monthlyInHandSalary || '',
+    })),
     documents: documents.map((doc) => ({
       id: doc._id,
       documentType: doc.documentType || 'other',
@@ -829,12 +855,23 @@ export async function respondToPublicVerification(token, payload) {
   }
 
   const workedHere = payload.workedHere === true;
-  const approved = workedHere;
+  // The verifier's explicit call decides the outcome. "Did not work here" is
+  // always a rejection; otherwise they must mark it verified or unverified.
+  const approved = workedHere && payload.employmentVerificationStatus === 'verified';
   const verificationLevel = await resolveVerificationLevel(request.verificationChannel, workedHere);
   const isCompanyInitiated = request.initiatedBy === 'company' && request.requestingCompanyId;
 
   if (payload.declarationAccepted !== true) {
     throw ApiError.badRequest('Please accept the declaration to submit the verification');
+  }
+
+  // Both decisions must be explicit — only meaningful when the verifier
+  // confirms the person actually worked there.
+  if (workedHere && !['verified', 'unverified'].includes(payload.salaryVerificationStatus)) {
+    throw ApiError.badRequest('Please mark the salary as Verified or Unverified before submitting');
+  }
+  if (workedHere && !['verified', 'unverified'].includes(payload.employmentVerificationStatus)) {
+    throw ApiError.badRequest('Please mark this employment as Verified or Unverified before submitting');
   }
 
   request.employmentDetails = buildEmploymentDetailsFromPayload(payload, workedHere);

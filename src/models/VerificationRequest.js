@@ -22,6 +22,22 @@ const employmentDetailsSchema = new mongoose.Schema(
     companyCin: { type: String, default: '' },
     companyGst: { type: String, default: '' },
     lastDrawnSalary: { type: String, default: '' },
+    // Salary confirmation: HR states the exact monthly take-home and marks
+    // whether it matches what the employee declared.
+    monthlyInHandSalary: { type: String, default: '' },
+    yearlyPackage: { type: String, default: '' },
+    salaryVerificationStatus: {
+      type: String,
+      enum: ['verified', 'unverified', ''],
+      default: '',
+    },
+    // The verifier's overall call on this employment — drives whether the
+    // request is approved, independent of the individual field answers.
+    employmentVerificationStatus: {
+      type: String,
+      enum: ['verified', 'unverified', ''],
+      default: '',
+    },
     // Structured HR verification form
     reportingManager: { type: String, default: '' },
     performanceRating: {

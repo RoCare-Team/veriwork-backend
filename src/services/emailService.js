@@ -18,6 +18,7 @@ import { env } from '../config/env.js';
  */
 
 let transporterPromise = null;
+let verificationTransporterPromise = null;
 
 async function loadNodemailer() {
   try {
@@ -63,6 +64,34 @@ async function getTransporter() {
     })();
   }
   return transporterPromise;
+}
+
+/**
+ * Dedicated transporter for verification email, authenticated as
+ * verification@pagerlook.com. Uses the same host/port/secure as the global
+ * SMTP (same mail server), only the mailbox differs. Returns null when the
+ * verification mailbox isn't configured, so callers fall back to the global one.
+ */
+async function getVerificationTransporter() {
+  const v = env.email.verification;
+  if (!env.email.smtpHost || !v.user || !v.pass) return null;
+  if (!verificationTransporterPromise) {
+    console.log(`[email] Verification SMTP enabled → user=${v.user}`);
+    verificationTransporterPromise = (async () => {
+      const nodemailer = await loadNodemailer();
+      if (!nodemailer) return null;
+      return nodemailer.createTransport({
+        host: env.email.smtpHost,
+        port: env.email.smtpPort,
+        secure: env.email.smtpSecure,
+        auth: { user: v.user, pass: v.pass },
+        pool: true,
+        maxConnections: 2,
+        maxMessages: 50,
+      });
+    })();
+  }
+  return verificationTransporterPromise;
 }
 
 /**
@@ -216,26 +245,51 @@ function renderEmail({ heading, preheader = '', bodyHtml = '', cta, footerNote =
  * @param {string} [opts.category] Label used only for mock-mode logging.
  * @param {string[]} [opts.logLinks] Extra links to print in mock mode.
  */
-async function sendEmail({ to, subject, html, text, companySmtp = null, category = 'email', logLinks = [] }) {
+async function sendEmail({
+  to,
+  cc = null,
+  subject,
+  html,
+  text,
+  companySmtp = null,
+  channel = null,
+  category = 'email',
+  logLinks = [],
+}) {
   const deliver = async (transport, from, via) => {
     const message = { from, to, subject, text, html };
+    if (cc) message.cc = cc;
     if (env.email.replyTo) message.replyTo = env.email.replyTo;
     await transport.sendMail(message);
-    console.log(`[email] sent "${category}" to ${to} via ${via}`);
+    console.log(`[email] sent "${category}" to ${to}${cc ? ` (cc ${cc})` : ''} via ${via}`);
     return { sent: true, mock: false };
   };
 
-  const primary = await resolveTransport(companySmtp);
+  // Pick the primary transport: an explicit per-company config wins; otherwise
+  // verification email uses the dedicated verification@ mailbox; else global.
+  let primary;
+  let primaryLabel;
+  if (companySmtp) {
+    primary = await resolveTransport(companySmtp);
+    primaryLabel = 'company SMTP';
+  } else if (channel === 'verification') {
+    const vt = await getVerificationTransporter();
+    primary = vt ? { transport: vt, from: env.email.verification.from } : await resolveTransport(null);
+    primaryLabel = vt ? 'verification SMTP' : 'global SMTP';
+  } else {
+    primary = await resolveTransport(null);
+    primaryLabel = 'global SMTP';
+  }
 
-  // Try the requested transport first (per-company if supplied, else global env).
+  // Try the primary transport, then fall back to the global one on failure.
   if (primary.transport) {
     try {
-      return await deliver(primary.transport, primary.from, companySmtp ? 'company SMTP' : 'global SMTP');
+      return await deliver(primary.transport, primary.from, primaryLabel);
     } catch (err) {
-      console.error(`[email] "${category}" to ${to} via ${companySmtp ? 'company SMTP' : 'global SMTP'} failed: ${err.message}`);
-      // A broken per-company config must not block delivery — fall back to the
-      // platform's own global SMTP account (the one that actually works).
-      if (companySmtp) {
+      console.error(`[email] "${category}" to ${to} via ${primaryLabel} failed: ${err.message}`);
+      // A broken company/verification config must not block delivery — fall back
+      // to the platform's own global SMTP account (the one that always works).
+      if (primaryLabel !== 'global SMTP') {
         const globalTransport = await getTransporter();
         if (globalTransport) {
           try {
@@ -510,6 +564,7 @@ export async function sendEmploymentVerificationEmail({
   isPlatformCompany,
   initiatedBy = 'company',
   companySmtp = null,
+  cc = null,
 }) {
   const isSelfInitiated = initiatedBy === 'employee';
   const roleLine = `${designation ? ` (<strong>${escapeHtml(designation)}</strong>)` : ''}${duration ? ` — ${escapeHtml(duration)}` : ''}`;
@@ -545,6 +600,8 @@ export async function sendEmploymentVerificationEmail({
 
   return sendEmail({
     to,
+    // CC the employee so they keep a copy of the verification request.
+    cc,
     subject,
     html: renderEmail({
       heading: 'Employment verification request',
@@ -555,6 +612,8 @@ export async function sendEmploymentVerificationEmail({
     }),
     text,
     companySmtp,
+    // Send from verification@pagerlook.com unless the company uses its own SMTP.
+    channel: 'verification',
     category: 'Employment verification',
     logLinks: verificationLink ? [verificationLink] : [],
   });

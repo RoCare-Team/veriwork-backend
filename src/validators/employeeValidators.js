@@ -181,6 +181,22 @@ export const createJobSchema = z.object({
   companyCin: z.string().max(25).optional(),
   companyGst: z.string().max(20).optional(),
   lastDrawnSalary: z.string().max(30).optional(),
+  monthlyInHandSalary: z.string().max(30).optional(),
+  yearlyPackage: z.string().max(30).optional(),
+  // Career progression within the same company (joined as X, promoted to Y).
+  positions: z
+    .array(
+      z.object({
+        title: z.string().min(1, 'Role is required').max(120),
+        fromDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'From date must be YYYY-MM-DD').optional().or(z.literal('')),
+        toDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'To date must be YYYY-MM-DD').optional().or(z.literal('')),
+        isCurrent: z.preprocess((val) => val === true || val === 'true', z.boolean().optional()),
+        yearlyPackage: z.string().max(30).optional(),
+        monthlyInHandSalary: z.string().max(30).optional(),
+      }),
+    )
+    .max(15, 'At most 15 roles can be added')
+    .optional(),
   description: z.string().max(2000).optional(),
 }).superRefine((data, ctx) => {
   if (!data.isPresent && data.joiningDate && data.exitDate && data.exitDate < data.joiningDate) {

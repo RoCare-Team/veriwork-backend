@@ -1,5 +1,22 @@
 import mongoose from 'mongoose';
 
+/**
+ * One role held at the same company. Lets an employee record their progression
+ * — e.g. joined as Software Engineer, promoted to Senior Software Engineer —
+ * so a verifier can confirm the whole journey, not just the final title.
+ */
+const jobPositionSchema = new mongoose.Schema(
+  {
+    title: { type: String, required: true },
+    fromDate: { type: String, default: '' },
+    toDate: { type: String, default: '' },
+    isCurrent: { type: Boolean, default: false },
+    yearlyPackage: { type: String, default: '' },
+    monthlyInHandSalary: { type: String, default: '' },
+  },
+  { _id: false },
+);
+
 const jobExperienceSchema = new mongoose.Schema(
   {
     userId: {
@@ -34,6 +51,13 @@ const jobExperienceSchema = new mongoose.Schema(
     companyCin: { type: String, default: '' },
     companyGst: { type: String, default: '' },
     lastDrawnSalary: { type: String, default: '' },
+    // Monthly take-home the employee declares; HR confirms the exact figure
+    // during verification (see salaryVerificationStatus on VerificationRequest).
+    monthlyInHandSalary: { type: String, default: '' },
+    // Annual CTC for the role, alongside the monthly take-home above.
+    yearlyPackage: { type: String, default: '' },
+    // Career progression within this same company (oldest → newest).
+    positions: { type: [jobPositionSchema], default: [] },
     description: { type: String, default: '' },
     status: {
       type: String,
