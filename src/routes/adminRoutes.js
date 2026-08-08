@@ -7,6 +7,8 @@ import {
   adminEmployeesQuerySchema,
   reviewDocumentSchema,
   onboardingMessageSchema,
+  aadhaarRequestsQuerySchema,
+  reviewAadhaarSchema,
 } from '../validators/adminValidators.js';
 import * as adminController from '../controllers/adminController.js';
 
@@ -21,6 +23,19 @@ router.get(
   asyncHandler(adminController.listEmployees),
 );
 router.get('/employees/:id', asyncHandler(adminController.getEmployee));
+
+// Manual Aadhaar KYC review queue
+router.get(
+  '/aadhaar-requests',
+  validate(aadhaarRequestsQuerySchema, 'query'),
+  asyncHandler(adminController.listAadhaarRequests),
+);
+router.get('/aadhaar-requests/:id', asyncHandler(adminController.getAadhaarRequest));
+router.patch(
+  '/aadhaar-requests/:id/review',
+  validate(reviewAadhaarSchema),
+  asyncHandler(adminController.reviewAadhaarRequest),
+);
 router.get('/companies', asyncHandler(adminController.listCompanies));
 router.get('/companies/:id', asyncHandler(adminController.getCompany));
 router.patch(

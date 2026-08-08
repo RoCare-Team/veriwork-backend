@@ -159,8 +159,18 @@ function escapeHtml(value = '') {
  * @param {string} [opts.footerNote] Small note under the button (e.g. expiry).
  */
 function renderEmail({ heading, preheader = '', bodyHtml = '', cta, footerNote = '' }) {
-  const { brandName, brandTagline, brandColor, brandLogoUrl, supportEmail } = env.email;
+  const {
+    brandName,
+    brandTagline,
+    brandColor,
+    brandLogoUrl,
+    supportEmail,
+    supportPhone,
+    instagramUrl,
+  } = env.email;
   const year = new Date().getFullYear();
+  // wa.me rejects '+' and separators, tel: keeps the E.164 form as-is.
+  const whatsappNumber = String(supportPhone || '').replace(/\D/g, '');
 
   const logo = brandLogoUrl
     ? `<img src="${brandLogoUrl}" alt="${escapeHtml(brandName)}" height="34" style="display:block;border:0;outline:none;" />`
@@ -215,6 +225,19 @@ function renderEmail({ heading, preheader = '', bodyHtml = '', cta, footerNote =
                 <p style="margin:0;color:#94a3b8;font-size:12px;line-height:1.6;">
                   This is an automated message from ${escapeHtml(brandName)}. Need help? Contact
                   <a href="mailto:${supportEmail}" style="color:${brandColor};text-decoration:none;">${supportEmail}</a>.
+                </p>
+                <p style="margin:8px 0 0;color:#94a3b8;font-size:12px;line-height:1.6;">
+                  ${
+                    whatsappNumber
+                      ? `<a href="https://wa.me/${whatsappNumber}" style="color:${brandColor};text-decoration:none;">WhatsApp ${escapeHtml(supportPhone)}</a>
+                  &nbsp;·&nbsp;
+                  <a href="tel:${escapeHtml(supportPhone)}" style="color:${brandColor};text-decoration:none;">Call ${escapeHtml(supportPhone)}</a>`
+                      : ''
+                  }${
+                    instagramUrl
+                      ? `${whatsappNumber ? '&nbsp;·&nbsp;' : ''}<a href="${escapeHtml(instagramUrl)}" style="color:${brandColor};text-decoration:none;">Instagram</a>`
+                      : ''
+                  }
                 </p>
                 <p style="margin:8px 0 0;color:#cbd5e1;font-size:12px;">© ${year} ${escapeHtml(brandName)}. All rights reserved.</p>
               </td>

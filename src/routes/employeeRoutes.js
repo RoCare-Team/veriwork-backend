@@ -7,7 +7,7 @@ import { preprocessProfileBody } from '../middleware/preprocessProfileBody.js';
 import {
   updateProfileSchema,
   setupProfileSchema,
-  aadhaarVerifySchema,
+  aadhaarManualSubmitSchema,
   endorseEmployeeSchema,
   createJobSchema,
   activityActionSchema,
@@ -60,10 +60,29 @@ router.post('/endorse', validate(endorseEmployeeSchema), asyncHandler(employeeCo
 router.get('/professional-id', asyncHandler(employeeController.getProfessionalId));
 
 router.get('/verification/status', asyncHandler(employeeController.getVerificationStatus));
-router.post('/verification/aadhaar', validate(aadhaarVerifySchema), asyncHandler(employeeController.verifyAadhaar));
+
+// Manual Aadhaar KYC: the employee uploads the card front + back and types the
+// number; a platform admin reviews it before aadhaarVerified is set.
+router.get('/verification/aadhaar', asyncHandler(employeeController.getAadhaarSubmission));
+router.post(
+  '/verification/aadhaar',
+  uploadPhoto.fields([
+    { name: 'frontImage', maxCount: 1 },
+    { name: 'backImage', maxCount: 1 },
+  ]),
+  validate(aadhaarManualSubmitSchema),
+  asyncHandler(employeeController.submitAadhaar),
+);
+
+// `selfie` is matched against the approved Aadhaar photo; `poses` are the
+// left/right frames used for the liveness check.
 router.post(
   '/verification/biometric',
-  uploadPhoto.single('photo'),
+  uploadPhoto.fields([
+    { name: 'selfie', maxCount: 1 },
+    { name: 'photo', maxCount: 1 },
+    { name: 'poses', maxCount: 4 },
+  ]),
   asyncHandler(employeeController.verifyBiometric),
 );
 

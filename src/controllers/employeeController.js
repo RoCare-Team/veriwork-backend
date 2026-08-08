@@ -1,5 +1,6 @@
 import * as profileService from '../services/employeeProfileService.js';
 import * as verificationService from '../services/verificationService.js';
+import * as aadhaarVerificationService from '../services/aadhaarVerificationService.js';
 import * as jobService from '../services/jobService.js';
 import * as activityService from '../services/activityService.js';
 import * as vaultService from '../services/vaultService.js';
@@ -8,7 +9,6 @@ import * as endorsementService from '../services/endorsementService.js';
 import * as verificationRequestService from '../services/verificationRequestService.js';
 import * as profileSuggestionsService from '../services/profileSuggestionsService.js';
 import * as smtpSettingsService from '../services/smtpSettingsService.js';
-import { storeUploadedFile } from '../utils/fileUpload.js';
 
 export async function getSmtpSettings(req, res) {
   const data = await smtpSettingsService.getEmployeeSmtpSettings(req.user);
@@ -68,14 +68,28 @@ export async function getVerificationStatus(req, res) {
   res.json({ success: true, data: status });
 }
 
-export async function verifyAadhaar(req, res) {
-  const result = await verificationService.verifyAadhaar(req.user._id, req.body);
-  res.json({ success: true, data: result });
+export async function getAadhaarSubmission(req, res) {
+  const data = await aadhaarVerificationService.getSubmission(req.user._id);
+  res.json({ success: true, data });
+}
+
+export async function submitAadhaar(req, res) {
+  const result = await aadhaarVerificationService.submitManualAadhaar(
+    req.user._id,
+    req.body,
+    req.files,
+  );
+  res.status(201).json({ success: true, data: result });
 }
 
 export async function verifyBiometric(req, res) {
-  const stored = req.file ? await storeUploadedFile(req.file, 'biometric') : null;
-  const result = await verificationService.verifyBiometric(req.user._id, stored?.url ?? null);
+  // `selfie` is the front-facing frame we match against the Aadhaar photo;
+  // `poses` are the left/right frames captured during the liveness prompts.
+  const selfieFile = req.files?.selfie?.[0] || req.files?.photo?.[0] || null;
+  const result = await verificationService.verifyBiometric(req.user._id, {
+    selfieFile,
+    poseFiles: req.files?.poses || [],
+  });
   res.json({ success: true, data: result });
 }
 

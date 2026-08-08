@@ -146,10 +146,22 @@ export const setupProfileSchema = z
     }
   });
 
-export const aadhaarVerifySchema = z.object({
-  method: z.enum(['digilocker', 'otp']).default('digilocker'),
-  aadhaarNumber: z.string().optional(),
-  otp: z.string().optional(),
+// Manual Aadhaar submission. Arrives as multipart/form-data alongside the two
+// card images, so every field is a string and `consent` comes through as 'true'.
+export const aadhaarManualSubmitSchema = z.object({
+  aadhaarNumber: z
+    .string()
+    .trim()
+    .transform((v) => v.replace(/\D/g, ''))
+    .refine((v) => v.length === 12, 'Aadhaar number must be 12 digits'),
+  nameOnAadhaar: z.string().trim().min(2, 'Name as printed on the Aadhaar card is required').max(120),
+  dobOnAadhaar: z.string().trim().max(20).optional().default(''),
+  genderOnAadhaar: z.enum(['male', 'female', 'other', '']).optional().default(''),
+  addressOnAadhaar: z.string().trim().max(400).optional().default(''),
+  consent: z
+    .union([z.boolean(), z.string()])
+    .transform((v) => v === true || v === 'true')
+    .refine((v) => v === true, 'You must consent before submitting your Aadhaar'),
 });
 
 export const endorseEmployeeSchema = z.object({

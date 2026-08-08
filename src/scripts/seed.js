@@ -43,11 +43,15 @@ async function seed() {
   await clearCollections();
 
   const passwordHash = await bcrypt.hash('VeriWork@123', SALT_ROUNDS);
-  const adminPasswordHash = await bcrypt.hash('Admin@VeriWork123', SALT_ROUNDS);
 
-  // Platform admin
+  // Platform admin — overridable so a seeded environment doesn't ship with
+  // credentials that are published in this repo.
+  const adminEmail = (process.env.ADMIN_EMAIL || 'admin@pagerlook.local').trim().toLowerCase();
+  const adminPassword = process.env.ADMIN_PASSWORD || 'Admin@Local123';
+  const adminPasswordHash = await bcrypt.hash(adminPassword, SALT_ROUNDS);
+
   await User.create({
-    email: 'admin@veriwork.com',
+    email: adminEmail,
     passwordHash: adminPasswordHash,
     role: 'platform_admin',
   });
@@ -408,7 +412,11 @@ async function seed() {
 
   console.log('Seed complete!');
   console.log('');
-  console.log('Platform Admin: admin@veriwork.com / Admin@VeriWork123');
+  console.log(
+    process.env.ADMIN_PASSWORD
+      ? `Platform Admin: ${adminEmail} (password from ADMIN_PASSWORD)`
+      : `Platform Admin: ${adminEmail} / ${adminPassword}`,
+  );
   console.log('Enterprise login: hr@technova.com / VeriWork@123');
   console.log('Employee 1 (verified): +919888877766 — OTP: 123456');
   console.log('Employee 2 (partial):  +919777766655 — OTP: 123456');

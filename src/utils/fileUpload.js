@@ -37,3 +37,23 @@ export async function storeUploadedFile(file, folder = 'uploads') {
 
   return storeLocally(file);
 }
+
+/**
+ * Read back a file previously written by storeLocally. Only used for locally
+ * stored images (S3 objects are read by key), so anything that isn't an
+ * /uploads/<name> path returns null rather than touching the filesystem.
+ */
+export async function readLocalUpload(url) {
+  if (!url || typeof url !== 'string' || !url.startsWith('/uploads/')) return null;
+
+  const fileName = path.basename(url);
+  const filePath = path.join(uploadDir, fileName);
+  // Guard against traversal via a crafted url.
+  if (path.dirname(path.resolve(filePath)) !== uploadDir) return null;
+
+  try {
+    return await fs.promises.readFile(filePath);
+  } catch {
+    return null;
+  }
+}

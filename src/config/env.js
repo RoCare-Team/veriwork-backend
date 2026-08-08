@@ -55,6 +55,20 @@ export const env = Object.freeze({
       Number(process.env.OTP_EXPIRES_MINUTES) || 10,
   },
 
+  // SMS gateway (savshka) for phone OTP. When SMS_API_KEY is unset, OTP stays in
+  // dev mock mode (fixed code, no SMS). The DLT template + sender must match the
+  // registered content exactly, so those are env-driven, never hardcoded.
+  sms: {
+    enabled: Boolean(process.env.SMS_API_KEY),
+    apiUrl: process.env.SMS_API_URL || "https://api.savshka.co.in/api/sms",
+    apiKey: process.env.SMS_API_KEY || "",
+    senderId: process.env.SMS_SENDER_ID || "TLGCRO",
+    entityId: process.env.SMS_ENTITY_ID || "",
+    otpTemplateId: process.env.SMS_OTP_TEMPLATE_ID || "",
+    // Brand name embedded in the registered DLT template text.
+    brandName: process.env.SMS_BRAND_NAME || "Ro Care India",
+  },
+
   upload: {
     dir: process.env.UPLOAD_DIR || "uploads",
     maxFileSizeMb:
@@ -71,7 +85,39 @@ export const env = Object.freeze({
     bucket: process.env.AWS_S3_BUCKET || "pager-look",
   },
 
+  // Biometric face match runs on AWS Rekognition (CompareFaces + DetectFaces)
+  // and reuses the S3 credentials, so it turns on as soon as AWS is configured.
+  // Every threshold is env-driven so the strictness can be tuned without a deploy.
+  faceMatch: {
+    enabled:
+      process.env.FACE_MATCH_ENABLED === "false"
+        ? false
+        : Boolean(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY),
+    region:
+      process.env.AWS_REKOGNITION_REGION || process.env.AWS_REGION || "ap-south-1",
+    // Similarity (0-100) the live selfie must reach against the Aadhaar photo.
+    minSimilarity: Number(process.env.FACE_MATCH_MIN_SIMILARITY) || 85,
+    // Rekognition's confidence that the detected region really is a face.
+    minDetectionConfidence: Number(process.env.FACE_MATCH_MIN_CONFIDENCE) || 95,
+    // Reject selfies taken at a steep angle — they wreck match accuracy.
+    maxPoseDegrees: Number(process.env.FACE_MATCH_MAX_POSE_DEGREES) || 30,
+    minSharpness: Number(process.env.FACE_MATCH_MIN_SHARPNESS) || 20,
+    minBrightness: Number(process.env.FACE_MATCH_MIN_BRIGHTNESS) || 20,
+    // Degrees of head turn required across the liveness frames — a held-up
+    // printed photo cannot produce this.
+    minYawSpread: Number(process.env.FACE_MATCH_MIN_YAW_SPREAD) || 18,
+    maxAttempts: Number(process.env.FACE_MATCH_MAX_ATTEMPTS) || 8,
+  },
+
   isDev: process.env.NODE_ENV !== "production",
+
+  // Platform admin seeded at boot. Kept out of source so the console has its
+  // own credentials rather than a shared, published default. In production
+  // both must be set or the seed is skipped — see config/bootstrap.js.
+  admin: {
+    email: process.env.ADMIN_EMAIL || "",
+    password: process.env.ADMIN_PASSWORD || "",
+  },
 
   google: {
     clientId: process.env.GOOGLE_CLIENT_ID || "",
@@ -129,6 +175,11 @@ export const env = Object.freeze({
     brandTagline: process.env.EMAIL_BRAND_TAGLINE || "Verify. Trust. Grow.",
     brandColor: process.env.EMAIL_BRAND_COLOR || "#1e3a8a",
     brandLogoUrl: process.env.EMAIL_LOGO_URL || "",
-    supportEmail: process.env.EMAIL_SUPPORT || "support@pagerlook.com",
+    supportEmail: process.env.EMAIL_SUPPORT || "info@pagerlook.com",
+    // Contact channels rendered in the email footer. E.164, no separators —
+    // the same value drives the tel: and wa.me links.
+    supportPhone: process.env.EMAIL_SUPPORT_PHONE || "+918510099972",
+    instagramUrl:
+      process.env.EMAIL_INSTAGRAM_URL || "https://www.instagram.com/pagerlook/",
   },
 });

@@ -5,6 +5,7 @@ import { generatePublicSlug, generateVeriworkId, getInitials, normalizePhone } f
 import {
   calculateEmployeeScore,
   getScoreFactors,
+  getScoreBreakdown,
   getScorePercentile,
   getScoreRating,
   getVerificationPercent,
@@ -399,9 +400,10 @@ export async function getEmployeeScore(userId) {
 
   const jobs = await getJobsForUser(userId);
   const score = calculateEmployeeScore(profile, jobs);
+  const breakdown = getScoreBreakdown(profile, jobs);
   const factors = getScoreFactors(profile, jobs);
   const hierarchy = computeProfileVerificationTags(profile, jobs);
-  const endorsementFactor = factors.find((f) => f.id === 'endorsements');
+  const endorsementFactor = factors.find((f) => f.id === 'social');
 
   return {
     employeeScore: score,
@@ -409,6 +411,8 @@ export async function getEmployeeScore(userId) {
     trustScore: score,
     minScore: 300,
     maxScore: 1000,
+    trustPoints: breakdown.trustPoints,
+    maxTrustPoints: breakdown.maxTrustPoints,
     scoreRating: getScoreRating(score),
     percentile: getScorePercentile(score),
     factors,

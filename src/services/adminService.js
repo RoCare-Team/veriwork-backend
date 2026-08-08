@@ -1,3 +1,4 @@
+import { AadhaarVerification } from '../models/AadhaarVerification.js';
 import { Company } from '../models/Company.js';
 import { CompanyOnboarding } from '../models/CompanyOnboarding.js';
 import { EmployeeProfile } from '../models/EmployeeProfile.js';
@@ -58,6 +59,7 @@ export async function getDashboardStats() {
     totalEmployees,
     employeesProfileComplete,
     employeesVerified,
+    aadhaarPending,
   ] = await Promise.all([
     CompanyOnboarding.countDocuments({ status: 'submitted' }),
     CompanyOnboarding.countDocuments({ status: 'approved' }),
@@ -67,6 +69,7 @@ export async function getDashboardStats() {
     User.countDocuments({ role: 'employee' }),
     EmployeeProfile.countDocuments({ profileSetupComplete: true }),
     EmployeeProfile.countDocuments({ aadhaarVerified: true, biometricVerified: true }),
+    AadhaarVerification.countDocuments({ status: 'pending' }),
   ]);
 
   return {
@@ -78,6 +81,7 @@ export async function getDashboardStats() {
     totalEmployees,
     employeesProfileComplete,
     employeesVerified,
+    aadhaarPending,
   };
 }
 
@@ -240,8 +244,29 @@ export async function getEmployee(userId) {
   const profile = await EmployeeProfile.findOne({ userId }).lean();
   if (!profile) throw ApiError.notFound('Employee profile not found');
 
-  const companyMap = await loadLinkedCompanies([userId]);
-  return formatEmployeeDetail(profile, user, companyMap.get(userId.toString()) || []);
+  const [companyMap, aadhaar] = await Promise.all([
+    loadLinkedCompanies([userId]),
+    AadhaarVerification.findOne({ userId }).lean(),
+  ]);
+
+  return {
+    ...formatEmployeeDetail(profile, user, companyMap.get(userId.toString()) || []),
+    // Summary only — the full number and card images live behind the
+    // Aadhaar review screen.
+    aadhaarKyc: aadhaar
+      ? {
+          id: aadhaar._id,
+          status: aadhaar.status,
+          aadhaarMasked: `XXXX XXXX ${aadhaar.aadhaarLast4}`,
+          nameOnAadhaar: aadhaar.nameOnAadhaar,
+          submittedAt: aadhaar.submittedAt,
+          reviewedAt: aadhaar.reviewedAt,
+          rejectionReason: aadhaar.rejectionReason || '',
+          faceMatchSimilarity: aadhaar.faceMatch?.similarity || 0,
+          faceMatchMatched: aadhaar.faceMatch?.matched || false,
+        }
+      : null,
+  };
 }
 
 export async function listCompanyApplications(status) {
