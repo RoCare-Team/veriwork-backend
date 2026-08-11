@@ -53,6 +53,16 @@ export const env = Object.freeze({
     mockCode: process.env.OTP_MOCK_CODE || "123456",
     expiresMinutes:
       Number(process.env.OTP_EXPIRES_MINUTES) || 10,
+
+    // Test numbers that always get a fixed OTP and never trigger a real SMS —
+    // used for app-store/demo logins where a live SMS can't be received.
+    // Comma-separated in OTP_TEST_PHONES; stored normalized (+91XXXXXXXXXX).
+    testPhones: (process.env.OTP_TEST_PHONES || "7740847114")
+      .split(",")
+      .map((p) => p.replace(/\D/g, ""))
+      .filter(Boolean)
+      .map((d) => (d.length === 10 ? `+91${d}` : `+${d}`)),
+    testCode: process.env.OTP_TEST_CODE || "123456",
   },
 
   // SMS gateway (savshka) for phone OTP. When SMS_API_KEY is unset, OTP stays in

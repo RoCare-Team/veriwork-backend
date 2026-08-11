@@ -10,16 +10,27 @@ function generateOtpCode() {
   return String(crypto.randomInt(100000, 1000000));
 }
 
+/** Demo/test numbers get a fixed code and never hit the SMS gateway. */
+function isTestPhone(normalized) {
+  return env.otp.testPhones.includes(normalized);
+}
+
 export async function sendOtp(phone) {
   const normalized = normalizePhone(phone);
-  // Real random code when SMS is live; predictable mock code for local dev.
-  const code = env.sms.enabled ? generateOtpCode() : env.otp.mockCode;
+  const testPhone = isTestPhone(normalized);
+  // Real random code when SMS is live; predictable mock code for local dev
+  // and for the configured test numbers.
+  const code = testPhone
+    ? env.otp.testCode
+    : env.sms.enabled
+      ? generateOtpCode()
+      : env.otp.mockCode;
   const expiresAt = new Date(Date.now() + env.otp.expiresMinutes * 60 * 1000);
 
   await OtpSession.deleteMany({ phone: normalized });
   await OtpSession.create({ phone: normalized, code, expiresAt });
 
-  if (env.sms.enabled) {
+  if (env.sms.enabled && !testPhone) {
     const delivery = await sendOtpSms(normalized, code);
     if (!delivery.sent) {
       // Storing succeeded but the gateway didn't accept it — surface a clear
@@ -40,6 +51,14 @@ export async function sendOtp(phone) {
 
 export async function verifyOtp(phone, code) {
   const normalized = normalizePhone(phone);
+
+  // Test numbers always accept the fixed code, even if the session lapsed —
+  // a demo login must never fail on timing.
+  if (isTestPhone(normalized) && code === env.otp.testCode) {
+    await OtpSession.updateMany({ phone: normalized }, { $set: { verified: true } });
+    return normalized;
+  }
+
   const session = await OtpSession.findOne({ phone: normalized }).sort({ createdAt: -1 });
 
   if (!session) {
