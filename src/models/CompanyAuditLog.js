@@ -38,6 +38,8 @@ const companyAuditLogSchema = new mongoose.Schema(
         'verification_hr_response_rejected',
         'verification_document_confirmed',
         'verification_email_resent',
+        // Employee nudged a platform request their previous employer hasn't answered.
+        'verification_request_reminder',
         'employee_onboarding_assigned',
       ],
       required: true,

@@ -195,6 +195,15 @@ export async function createJobVerificationRequest(req, res) {
   res.status(201).json({ success: true, data });
 }
 
+export async function resendJobVerificationRequest(req, res) {
+  const data = await verificationRequestService.resendEmployeeVerificationRequest(
+    req.user._id,
+    req.params.id,
+    req.body,
+  );
+  res.json({ success: true, data });
+}
+
 export async function getJobVerification(req, res) {
   const data = await verificationRequestService.getJobVerificationStatus(req.user._id, req.params.id);
   res.json({ success: true, data });

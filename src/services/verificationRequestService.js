@@ -6,6 +6,7 @@ import { ApiError } from '../utils/ApiError.js';
 import { assertValidObjectId } from '../utils/objectId.js';
 import { createCompanyAuditLog } from './companyLinkingService.js';
 import { CompanyEmployee } from '../models/CompanyEmployee.js';
+import { User } from '../models/User.js';
 import {
   ACCESS_TYPES,
   requireEmployeeAccess,
@@ -30,6 +31,9 @@ import {
   isPermanentlyVerifiedJob,
   applyVerificationResult,
   generateExternalToken,
+  getResendState,
+  uniqueEmails,
+  RESEND_COOLDOWN_MINUTES,
 } from './employmentVerificationService.js';
 import { createActivity } from './activityService.js';
 import { OPEN_STATUSES, COMPLETED_VERIFIED_STATUSES } from '../utils/verificationStatusUtils.js';
@@ -403,6 +407,181 @@ export async function rejectEmployeeVerificationConsent(userId, requestId, paylo
 
   return mapVerificationRequest(request, {
     message: 'Verification request cancelled.',
+  });
+}
+
+/**
+ * Email-channel resend, shared by the employee follow-up and the platform
+ * admin's support resend.
+ *
+ * Swaps in corrected/added recipients (any number of them), keeps the secure
+ * link alive, mails everyone on the list, and stamps delivery. Returns the
+ * addresses actually mailed.
+ *
+ * `skipCooldown` exists for the platform admin: they act on a support request
+ * that has already been chased, so the employee-facing throttle would only get
+ * in the way.
+ */
+async function performEmailResend(request, job, payload = {}, { skipCooldown = false } = {}) {
+  const nextContacts = uniqueEmails([
+    payload.hrEmail,
+    payload.managerEmail,
+    ...(payload.hrContacts || []),
+  ]);
+  const currentContacts = uniqueEmails([
+    request.hrEmail,
+    request.managerEmail,
+    ...(request.hrContacts || []),
+  ]);
+  const contactsChanged = nextContacts.length > 0
+    && nextContacts.join(',').toLowerCase() !== currentContacts.join(',').toLowerCase();
+
+  // A new recipient hasn't been mailed yet, so the cool-down doesn't apply.
+  if (!skipCooldown && !getResendState(request).canResend && !contactsChanged) {
+    throw ApiError.tooManyRequests(
+      `The email was just sent. Please wait ${RESEND_COOLDOWN_MINUTES} minutes before re-sending.`,
+    );
+  }
+
+  if (contactsChanged) {
+    request.hrEmail = nextContacts[0] || '';
+    request.managerEmail = nextContacts[1] || '';
+    request.hrContacts = nextContacts;
+    job.hrEmail = nextContacts[0] || '';
+    job.managerEmail = nextContacts[1] || '';
+    job.hrContacts = nextContacts;
+    await job.save();
+  }
+  if (payload.hrName) request.hrName = payload.hrName;
+
+  const recipients = uniqueEmails([request.hrEmail, request.managerEmail, ...(request.hrContacts || [])]);
+  if (recipients.length === 0) {
+    throw ApiError.badRequest('Add at least one HR contact email before re-sending the request.');
+  }
+
+  // A resend must arrive with a link that still works — mint a fresh token when
+  // the old one lapsed, and reopen the request that expired with it.
+  const now = Date.now();
+  if (!request.externalToken
+    || (request.externalTokenExpiresAt && request.externalTokenExpiresAt.getTime() <= now)) {
+    request.externalToken = generateExternalToken();
+    request.externalTokenExpiresAt = new Date(now + 14 * 24 * 60 * 60 * 1000);
+  }
+  if (request.status === 'expired') {
+    request.status = 'in_review';
+    request.resolvedVia = null;
+  }
+  if (job.status !== 'verified') {
+    job.status = 'in_process';
+    await job.save();
+  }
+  await request.save();
+
+  const profile = await EmployeeProfile.findOne({ userId: request.employeeId }).select('name');
+  const emailResult = await sendVerificationEmails(request, job, profile);
+
+  request.emailStatus = deriveEmailStatus('email', emailResult);
+  request.emailLastSentAt = new Date();
+  request.lastRemindedAt = new Date();
+  request.remindersSent = (request.remindersSent || 0) + 1;
+  await request.save();
+
+  return { recipients, emailResult, contactsChanged };
+}
+
+/**
+ * Employee follow-up on a request the other side never answered.
+ *
+ * Deliberately NOT a new request: the same record and the same secure link are
+ * reused, so a resend can't create a duplicate the previous employer has to
+ * answer twice. Updated HR contacts are accepted (the first address is often a
+ * typo or a dead mailbox) and skip the cool-down, since a new recipient has not
+ * been mailed yet.
+ */
+export async function resendEmployeeVerificationRequest(userId, requestId, payload = {}) {
+  const validId = assertValidObjectId(requestId, 'verification request id');
+
+  const request = await VerificationRequest.findOne({ _id: validId, employeeId: userId });
+  if (!request) throw ApiError.notFound('Verification request not found');
+
+  const job = await JobExperience.findOne({ _id: request.jobExperienceId, userId });
+  if (!job) throw ApiError.notFound('Job not found');
+  if (isPermanentlyVerifiedJob(job)) {
+    throw ApiError.badRequest('This employment is already verified — no follow-up needed.');
+  }
+
+  const state = getResendState(request);
+  if (!state.canResend && !state.availableAt) {
+    // Wrong status (already answered / closed) — never resendable, contacts or not.
+    throw ApiError.badRequest(state.reason);
+  }
+
+  if (request.verificationChannel === 'platform') {
+    if (!state.canResend) {
+      throw ApiError.tooManyRequests(
+        `A reminder was just sent. Please wait ${RESEND_COOLDOWN_MINUTES} minutes before sending another.`,
+      );
+    }
+
+    request.lastRemindedAt = new Date();
+    request.remindersSent = (request.remindersSent || 0) + 1;
+    await request.save();
+
+    if (request.targetCompanyId) {
+      await createCompanyAuditLog({
+        companyId: request.targetCompanyId,
+        actorUserId: userId,
+        employeeId: userId,
+        action: 'verification_request_reminder',
+        entityType: 'verification_request',
+        entityId: request._id,
+        metadata: { remindersSent: request.remindersSent, previousCompanyName: request.previousCompanyName },
+      });
+    }
+
+    await createActivity(userId, {
+      type: 'verification',
+      title: 'Verification reminder sent',
+      message: `You sent a reminder to ${request.previousCompanyName} for your employment verification.`,
+      company: request.previousCompanyName,
+      status: 'info',
+      metadata: { verificationRequestId: request._id.toString(), event: 'verification_reminder' },
+    });
+
+    return mapVerificationRequest(request, {
+      jobTitle: job.title,
+      companyName: job.company,
+      message: `Reminder sent to ${request.previousCompanyName} on their PagerLook dashboard.`,
+    });
+  }
+
+  // Email channel — allow correcting/adding recipients before the resend.
+  const { recipients, emailResult } = await performEmailResend(request, job, payload);
+
+  await createActivity(userId, {
+    type: 'verification',
+    title: 'Verification request re-sent',
+    message: `You re-sent the verification request for ${job.company} to ${recipients.join(', ')}.`,
+    company: job.company,
+    status: 'info',
+    metadata: {
+      verificationRequestId: request._id.toString(),
+      event: 'verification_reminder',
+      remindersSent: request.remindersSent,
+    },
+  });
+
+  return mapVerificationRequest(request, {
+    jobTitle: job.title,
+    companyName: job.company,
+    emailSent: emailResult.sent,
+    emailMock: emailResult.mock,
+    recipients,
+    message: emailResult.sent
+      ? `Verification request re-sent to ${recipients.join(', ')}.`
+      : emailResult.mock
+        ? 'Mailer not configured — the email was logged in mock mode. Add your mailbox in Settings to send for real.'
+        : 'Could not send the email. Check the HR address and try again.',
   });
 }
 
@@ -784,6 +963,234 @@ export async function resendVerificationEmail(user, requestId) {
       : emailResult.mock
         ? 'Mailer not configured — email logged in mock mode. Configure SMTP to send for real.'
         : 'Failed to send email. Check your SMTP settings and try again.',
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Platform admin (support desk)
+ *
+ * Support gets asked "my verification never reached HR" from both sides of
+ * the product, so the admin view spans every request regardless of who
+ * started it — and says plainly WHO started it, since that decides whose
+ * mailbox the resend goes out from.
+ * ------------------------------------------------------------------ */
+
+// Expired requests get their own tab — they are still re-sendable, but they are
+// a different kind of problem from one nobody has answered yet.
+const ADMIN_OPEN_STATUSES = OPEN_STATUSES;
+
+/** Attribution for a request: the employee themselves, or a company's user. */
+function buildRequestedBy(request, { profile, company, user }) {
+  if (request.initiatedBy === 'employee') {
+    return {
+      type: 'employee',
+      name: profile?.name || 'Employee',
+      email: profile?.email || user?.email || '',
+      companyName: '',
+      label: `${profile?.name || 'Employee'} (self-initiated)`,
+    };
+  }
+
+  const companyName = company?.name || 'Company';
+  return {
+    type: 'company',
+    name: companyName,
+    email: user?.email || '',
+    companyName,
+    label: user?.email ? `${companyName} — ${user.email}` : companyName,
+  };
+}
+
+export async function listVerificationRequestsForAdmin({ status = 'all', q = '' } = {}) {
+  const filter = {};
+  if (status === 'open') filter.status = { $in: ADMIN_OPEN_STATUSES };
+  else if (status && status !== 'all') filter.status = status;
+
+  if (q?.trim()) {
+    const escaped = q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(escaped, 'i');
+    const [matchedProfiles, matchedCompanies] = await Promise.all([
+      EmployeeProfile.find({ $or: [{ name: regex }, { email: regex }, { veriworkId: regex }] })
+        .select('userId')
+        .limit(200),
+      Company.find({ name: regex }).select('_id').limit(100),
+    ]);
+
+    filter.$or = [
+      { employeeId: { $in: matchedProfiles.map((p) => p.userId) } },
+      { requestingCompanyId: { $in: matchedCompanies.map((c) => c._id) } },
+      { previousCompanyName: regex },
+      { hrEmail: regex },
+      { managerEmail: regex },
+      { hrContacts: regex },
+    ];
+  }
+
+  const requests = await VerificationRequest.find(filter).sort({ createdAt: -1 }).limit(300);
+  if (!requests.length) {
+    return { summary: { total: 0, open: 0, verified: 0, rejected: 0, expired: 0 }, requests: [] };
+  }
+
+  const employeeIds = [...new Set(requests.map((r) => r.employeeId?.toString()).filter(Boolean))];
+  const jobIds = [...new Set(requests.map((r) => r.jobExperienceId?.toString()).filter(Boolean))];
+  const companyIds = [...new Set(
+    requests
+      .flatMap((r) => [r.requestingCompanyId?.toString(), r.targetCompanyId?.toString()])
+      .filter(Boolean),
+  )];
+  const requesterIds = [...new Set(requests.map((r) => r.requestedBy?.toString()).filter(Boolean))];
+
+  const [profiles, jobs, companies, requesters] = await Promise.all([
+    EmployeeProfile.find({ userId: { $in: employeeIds } }).select('userId name email veriworkId'),
+    JobExperience.find({ _id: { $in: jobIds } }).select('title company'),
+    Company.find({ _id: { $in: companyIds } }).select('name'),
+    User.find({ _id: { $in: requesterIds } }).select('email role'),
+  ]);
+
+  const profileMap = new Map(profiles.map((p) => [p.userId.toString(), p]));
+  const jobMap = new Map(jobs.map((j) => [j._id.toString(), j]));
+  const companyMap = new Map(companies.map((c) => [c._id.toString(), c]));
+  const requesterMap = new Map(requesters.map((u) => [u._id.toString(), u]));
+
+  const mapped = requests.map((request) => {
+    const profile = profileMap.get(request.employeeId?.toString());
+    const job = jobMap.get(request.jobExperienceId?.toString());
+    const requestingCompany = companyMap.get(request.requestingCompanyId?.toString());
+    const targetCompany = companyMap.get(request.targetCompanyId?.toString());
+    const resendState = getResendState(request);
+
+    return mapVerificationRequest(request, {
+      employeeName: profile?.name || 'Employee',
+      employeeEmail: profile?.email || '',
+      employeeVeriworkId: profile?.veriworkId || '',
+      jobTitle: job?.title || '',
+      companyName: job?.company || request.previousCompanyName,
+      requestingCompanyName: requestingCompany?.name || '',
+      targetCompanyName: targetCompany?.name || '',
+      requestedBy: buildRequestedBy(request, {
+        profile,
+        company: requestingCompany,
+        user: requesterMap.get(request.requestedBy?.toString()),
+      }),
+      // Admins bypass the employee cool-down, so this only reports whether the
+      // request is in a state that can be re-sent at all.
+      canResend: resendState.canResend || Boolean(resendState.availableAt),
+      resendBlockedReason: resendState.availableAt ? '' : resendState.reason,
+    });
+  });
+
+  return {
+    summary: {
+      total: mapped.length,
+      open: mapped.filter((r) => ADMIN_OPEN_STATUSES.includes(r.rawStatus)).length,
+      verified: mapped.filter((r) => COMPLETED_VERIFIED_STATUSES.includes(r.rawStatus)).length,
+      rejected: mapped.filter((r) => r.rawStatus === 'rejected').length,
+      expired: mapped.filter((r) => r.rawStatus === 'expired').length,
+    },
+    requests: mapped,
+  };
+}
+
+/**
+ * Support resend. Same request, same secure link — only the recipient list may
+ * change. The employee-facing cool-down is skipped: an admin is already acting
+ * on a "nobody replied" complaint.
+ */
+export async function adminResendVerificationRequest(adminUserId, requestId, payload = {}) {
+  const validId = assertValidObjectId(requestId, 'verification request id');
+
+  const request = await VerificationRequest.findById(validId);
+  if (!request) throw ApiError.notFound('Verification request not found');
+
+  const job = await JobExperience.findById(request.jobExperienceId);
+  if (!job) throw ApiError.notFound('Job experience not found');
+  if (isPermanentlyVerifiedJob(job)) {
+    throw ApiError.badRequest('This employment is already verified — no follow-up needed.');
+  }
+
+  const state = getResendState(request);
+  if (!state.canResend && !state.availableAt) {
+    // Wrong status (already answered / closed) — never resendable, contacts or not.
+    throw ApiError.badRequest(state.reason);
+  }
+
+  if (request.verificationChannel === 'platform') {
+    request.lastRemindedAt = new Date();
+    request.remindersSent = (request.remindersSent || 0) + 1;
+    await request.save();
+
+    if (request.targetCompanyId) {
+      await createCompanyAuditLog({
+        companyId: request.targetCompanyId,
+        actorUserId: adminUserId,
+        employeeId: request.employeeId,
+        action: 'verification_request_reminder',
+        entityType: 'verification_request',
+        entityId: request._id,
+        metadata: {
+          remindersSent: request.remindersSent,
+          previousCompanyName: request.previousCompanyName,
+          byPlatformAdmin: true,
+        },
+      });
+    }
+
+    await createActivity(request.employeeId, {
+      type: 'verification',
+      title: 'Verification reminder sent',
+      message: `PagerLook support sent ${request.previousCompanyName} a reminder for your employment verification.`,
+      company: request.previousCompanyName,
+      status: 'info',
+      metadata: { verificationRequestId: request._id.toString(), event: 'verification_reminder' },
+    });
+
+    return mapVerificationRequest(request, {
+      jobTitle: job.title,
+      companyName: job.company,
+      message: `Reminder sent to ${request.previousCompanyName} on their PagerLook dashboard.`,
+    });
+  }
+
+  const { recipients, emailResult } = await performEmailResend(request, job, payload, {
+    skipCooldown: true,
+  });
+
+  if (request.requestingCompanyId) {
+    await createCompanyAuditLog({
+      companyId: request.requestingCompanyId,
+      actorUserId: adminUserId,
+      employeeId: request.employeeId,
+      action: 'verification_email_resent',
+      entityType: 'verification_request',
+      entityId: request._id,
+      metadata: { emailStatus: request.emailStatus, recipients, byPlatformAdmin: true },
+    });
+  }
+
+  await createActivity(request.employeeId, {
+    type: 'verification',
+    title: 'Verification request re-sent',
+    message: `PagerLook support re-sent your verification request for ${job.company} to ${recipients.join(', ')}.`,
+    company: job.company,
+    status: 'info',
+    metadata: {
+      verificationRequestId: request._id.toString(),
+      event: 'verification_reminder',
+      remindersSent: request.remindersSent,
+    },
+  });
+
+  return mapVerificationRequest(request, {
+    jobTitle: job.title,
+    companyName: job.company,
+    emailSent: emailResult.sent,
+    emailMock: emailResult.mock,
+    recipients,
+    message: emailResult.sent
+      ? `Verification request re-sent to ${recipients.join(', ')}.`
+      : emailResult.mock
+        ? 'Mailer not configured — the email was logged in mock mode. Configure SMTP to send for real.'
+        : 'Could not send the email. Check the HR addresses and try again.',
   });
 }
 

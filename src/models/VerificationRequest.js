@@ -158,6 +158,10 @@ const verificationRequestSchema = new mongoose.Schema(
       default: 'not_applicable',
     },
     emailLastSentAt: { type: Date, default: null },
+    // Last time the request was re-sent / nudged (either channel). Drives the
+    // resend cool-down so HR isn't mailed on every button press.
+    lastRemindedAt: { type: Date, default: null },
+    remindersSent: { type: Number, default: 0 },
     scoreImpactApplied: { type: Boolean, default: false },
     notes: { type: String, default: '' },
     resolvedVia: {

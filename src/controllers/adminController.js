@@ -1,6 +1,7 @@
 import * as adminService from '../services/adminService.js';
 import * as onboardingReviewService from '../services/onboardingReviewService.js';
 import * as aadhaarVerificationService from '../services/aadhaarVerificationService.js';
+import * as verificationRequestService from '../services/verificationRequestService.js';
 
 export async function reviewCompanyDocument(req, res) {
   const data = await onboardingReviewService.reviewOnboardingDocument(
@@ -60,6 +61,23 @@ export async function listEmployees(req, res) {
 export async function getEmployee(req, res) {
   const employee = await adminService.getEmployee(req.params.id);
   res.json({ success: true, data: employee });
+}
+
+export async function listVerificationRequests(req, res) {
+  const data = await verificationRequestService.listVerificationRequestsForAdmin({
+    status: req.query.status,
+    q: req.query.q,
+  });
+  res.json({ success: true, data });
+}
+
+export async function resendVerificationRequest(req, res) {
+  const data = await verificationRequestService.adminResendVerificationRequest(
+    req.user._id,
+    req.params.id,
+    req.body,
+  );
+  res.json({ success: true, data });
 }
 
 export async function listAadhaarRequests(req, res) {

@@ -220,9 +220,32 @@ export const createJobSchema = z.object({
   }
 });
 
+/*
+ * A verification request can name several HR contacts — big companies route
+ * these through more than one mailbox, and a single dead address is the most
+ * common reason nobody ever replies. Capped so one request can't be turned into
+ * a bulk mailer.
+ */
+export const MAX_HR_CONTACTS = 10;
+
+const hrContactsField = z
+  .array(z.string().email('Enter a valid HR email address'))
+  .max(MAX_HR_CONTACTS, `At most ${MAX_HR_CONTACTS} HR contacts can be added`)
+  .optional();
+
 export const jobVerificationRequestSchema = z.object({
-  hrEmail: z.string().email().optional(),
-  managerEmail: z.string().email().optional(),
+  hrEmail: z.string().email().optional().or(z.literal('')),
+  managerEmail: z.string().email().optional().or(z.literal('')),
+  hrContacts: hrContactsField,
+  hrName: z.string().optional(),
+});
+
+// Re-sending an unanswered request: every field is optional — the employee may
+// simply nudge, or correct/extend the HR contacts that never replied.
+export const resendVerificationRequestSchema = z.object({
+  hrEmail: z.string().email().optional().or(z.literal('')),
+  managerEmail: z.string().email().optional().or(z.literal('')),
+  hrContacts: hrContactsField,
   hrName: z.string().optional(),
 });
 

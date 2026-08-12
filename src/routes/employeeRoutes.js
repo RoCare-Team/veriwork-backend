@@ -15,6 +15,7 @@ import {
   activityQuerySchema,
   updateSettingsSchema,
   jobVerificationRequestSchema,
+  resendVerificationRequestSchema,
   suggestionsQuerySchema,
   smtpSettingsSchema,
   smtpTestSchema,
@@ -100,6 +101,13 @@ router.post(
 );
 router.get('/jobs/:id/verification', asyncHandler(employeeController.getJobVerification));
 router.get('/verification/requests', asyncHandler(employeeController.listVerificationRequests));
+// Follow-up when the previous employer never responded — re-sends the SAME
+// request (no duplicate), optionally to a corrected HR address.
+router.post(
+  '/verification-requests/:id/resend',
+  validate(resendVerificationRequestSchema),
+  asyncHandler(employeeController.resendJobVerificationRequest),
+);
 router.post('/verification-requests/:id/approve-consent', asyncHandler(employeeController.approveVerificationConsent));
 router.post('/verification-requests/:id/reject-consent', asyncHandler(employeeController.rejectVerificationConsent));
 router.get('/verification/tags', asyncHandler(employeeController.getVerificationTags));

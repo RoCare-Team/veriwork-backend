@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_HR_CONTACTS } from './employeeValidators.js';
 
 export const adminEmployeesQuerySchema = z.object({
   q: z.string().max(100).optional(),
@@ -41,6 +42,24 @@ export const reviewAadhaarSchema = z
       });
     }
   });
+
+// Support desk view over every verification request, whoever started it.
+export const adminVerificationRequestsQuerySchema = z.object({
+  status: z
+    .enum(['all', 'open', 'pending', 'in_review', 'hr_responded', 'verified', 'rejected', 'expired'])
+    .optional()
+    .default('all'),
+  q: z.string().max(100).optional(),
+});
+
+// Support resend — the admin may fix or extend the HR contact list first.
+export const adminResendVerificationSchema = z.object({
+  hrContacts: z
+    .array(z.string().email('Enter a valid HR email address'))
+    .max(MAX_HR_CONTACTS, `At most ${MAX_HR_CONTACTS} HR contacts can be added`)
+    .optional(),
+  hrName: z.string().max(120).optional(),
+});
 
 export const onboardingMessageSchema = z.object({
   body: z.string().trim().min(1, 'Message cannot be empty').max(2000),

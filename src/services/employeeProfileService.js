@@ -9,6 +9,7 @@ import {
   getScorePercentile,
   getScoreRating,
   getVerificationPercent,
+  isPortalUnlocked,
   isVerificationComplete,
 } from './scoreService.js';
 import { computeProfileVerificationTags } from './verificationTagsService.js';
@@ -154,6 +155,8 @@ export function buildProfileResponse(profile, jobs = []) {
     scoreRating: getScoreRating(score),
     trustScore: score,
     isVerified: verified,
+    // Portal features unlock without the (optional) face match — see isPortalUnlocked.
+    portalUnlocked: isPortalUnlocked(profile),
     createdAt: profile.createdAt,
     updatedAt: profile.updatedAt,
   };

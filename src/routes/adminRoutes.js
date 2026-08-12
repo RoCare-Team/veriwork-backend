@@ -9,6 +9,8 @@ import {
   onboardingMessageSchema,
   aadhaarRequestsQuerySchema,
   reviewAadhaarSchema,
+  adminVerificationRequestsQuerySchema,
+  adminResendVerificationSchema,
 } from '../validators/adminValidators.js';
 import * as adminController from '../controllers/adminController.js';
 
@@ -23,6 +25,19 @@ router.get(
   asyncHandler(adminController.listEmployees),
 );
 router.get('/employees/:id', asyncHandler(adminController.getEmployee));
+
+// Employment verification support desk — every request, whoever started it,
+// plus a resend that can fix or extend the HR contact list.
+router.get(
+  '/verification-requests',
+  validate(adminVerificationRequestsQuerySchema, 'query'),
+  asyncHandler(adminController.listVerificationRequests),
+);
+router.post(
+  '/verification-requests/:id/resend',
+  validate(adminResendVerificationSchema),
+  asyncHandler(adminController.resendVerificationRequest),
+);
 
 // Manual Aadhaar KYC review queue
 router.get(

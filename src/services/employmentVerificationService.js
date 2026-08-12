@@ -146,6 +146,9 @@ export function mapVerificationRequest(request, extras = {}) {
     verificationTag: tag,
     hrEmail: request.hrEmail,
     managerEmail: request.managerEmail,
+    // Every address this request is mailed to, in send order. hrEmail/managerEmail
+    // are kept alongside it only so older readers keep working.
+    hrContacts: uniqueEmails([request.hrEmail, request.managerEmail, ...(request.hrContacts || [])]),
     hrName: request.hrName,
     status: normalizedStatus,
     statusLabel: getVerificationStatusLabel(request.status),
@@ -159,8 +162,40 @@ export function mapVerificationRequest(request, extras = {}) {
     resolvedVia: request.resolvedVia,
     emailStatus: request.emailStatus || 'not_applicable',
     emailLastSentAt: request.emailLastSentAt || null,
+    lastRemindedAt: request.lastRemindedAt || null,
+    remindersSent: request.remindersSent || 0,
     ...extras,
   };
+}
+
+/**
+ * Re-sending a request is a nudge, not a new request — the same record and the
+ * same secure link are reused. The cool-down keeps HR from being mailed once per
+ * button press while still letting the employee follow up when nobody replies.
+ */
+export const RESEND_COOLDOWN_MINUTES = 2;
+
+const RESENDABLE_STATUSES = ['pending', 'in_review', 'in_process', 'expired'];
+
+export function getResendState(request) {
+  if (!request) {
+    return { canResend: false, availableAt: null, reason: 'No verification request to re-send' };
+  }
+  if (!RESENDABLE_STATUSES.includes(request.status)) {
+    const reason = request.status === 'hr_responded'
+      ? 'HR has already responded — this request is awaiting review'
+      : request.status === 'pending_employee_consent'
+        ? 'Approve the consent request first'
+        : 'This request is already closed';
+    return { canResend: false, availableAt: null, reason };
+  }
+
+  const last = request.lastRemindedAt || request.emailLastSentAt || request.requestedAt || request.createdAt;
+  const availableAt = last ? new Date(new Date(last).getTime() + RESEND_COOLDOWN_MINUTES * 60 * 1000) : null;
+  if (availableAt && availableAt > new Date()) {
+    return { canResend: false, availableAt, reason: `You can re-send in a couple of minutes` };
+  }
+  return { canResend: true, availableAt, reason: '' };
 }
 
 export const PERMANENT_VERIFICATION_LEVELS = ['document_verified', 'hr_verified', 'employer_verified'];
@@ -536,12 +571,23 @@ export async function createEmployeeVerificationRequest(userId, jobId, payload) 
     );
   }
 
-  const hrContacts = uniqueEmails(
-    payload.hrContacts?.length ? payload.hrContacts : job.hrContacts,
-  );
-  const hrEmail = payload.hrEmail || hrContacts[0] || job.hrEmail || '';
-  const managerEmail =
-    payload.managerEmail || hrContacts[1] || job.managerEmail || job.companyEmail || '';
+  // One canonical recipient list — the employee may name as many HR contacts as
+  // they actually have. hrEmail/managerEmail just mirror the first two so older
+  // readers of those columns keep working.
+  const submittedContacts = uniqueEmails([
+    payload.hrEmail,
+    payload.managerEmail,
+    ...(payload.hrContacts || []),
+  ]);
+  const savedContacts = uniqueEmails([
+    ...(job.hrContacts || []),
+    job.hrEmail,
+    job.managerEmail,
+    job.companyEmail,
+  ]);
+  const hrContacts = submittedContacts.length ? submittedContacts : savedContacts;
+  const hrEmail = hrContacts[0] || '';
+  const managerEmail = hrContacts[1] || '';
 
   if (hrEmail) job.hrEmail = hrEmail;
   if (managerEmail) job.managerEmail = managerEmail;
@@ -554,7 +600,7 @@ export async function createEmployeeVerificationRequest(userId, jobId, payload) 
   const previousCompany = await findPreviousCompanyByName(job.company);
   const verificationChannel = previousCompany ? 'platform' : 'email';
 
-  if (verificationChannel === 'email' && !hrEmail && !managerEmail && !hrContacts.length) {
+  if (verificationChannel === 'email' && !hrContacts.length) {
     throw ApiError.badRequest('At least one HR contact email is required when company is not on PagerLook');
   }
 
@@ -670,6 +716,10 @@ export async function getJobVerificationStatus(userId, jobId) {
     getExistingApprovedVerification(job._id),
   ]);
 
+  // The one request an employee can still nudge — most recent open/expired one.
+  const openRequest = requests.find((r) => RESENDABLE_STATUSES.includes(r.status));
+  const resendState = getResendState(openRequest);
+
   return {
     job: {
       id: job._id,
@@ -682,6 +732,7 @@ export async function getJobVerificationStatus(userId, jobId) {
       verificationFeedback: job.verificationFeedback,
       hrEmail: job.hrEmail,
       managerEmail: job.managerEmail,
+      hrContacts: uniqueEmails([...(job.hrContacts || []), job.hrEmail, job.managerEmail]),
     },
     documents: documents.map((doc) => ({
       id: doc._id,
@@ -696,6 +747,11 @@ export async function getJobVerificationStatus(userId, jobId) {
     alreadyVerified: Boolean(approvedRequest),
     canRequestVerification: job.status !== 'verified'
       && !requests.some((r) => OPEN_STATUSES.includes(r.status) || r.status === 'pending'),
+    // Follow-up on a request nobody has responded to yet.
+    resendableRequestId: openRequest && job.status !== 'verified' ? openRequest._id : null,
+    canResendVerification: Boolean(openRequest) && job.status !== 'verified' && resendState.canResend,
+    resendAvailableAt: openRequest && job.status !== 'verified' ? resendState.availableAt : null,
+    resendCooldownMinutes: RESEND_COOLDOWN_MINUTES,
     requiredDocuments: [
       'offer_letter',
       'salary_slip',
