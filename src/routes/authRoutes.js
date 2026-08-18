@@ -25,6 +25,10 @@ const router = Router();
  *   post:
  *     tags: [Auth]
  *     summary: Send OTP to employee phone
+ *     description: >
+ *       Returns { phone, otpLength, resendInSeconds, expiresInMinutes, message }.
+ *       429 when the resend cooldown or the hourly cap is hit — `details.retryAfterSeconds`
+ *       says how long to wait.
  */
 router.post('/employee/otp/send', validate(phoneSchema), asyncHandler(authController.sendEmployeeOtp));
 
@@ -34,6 +38,10 @@ router.post('/employee/otp/send', validate(phoneSchema), asyncHandler(authContro
  *   post:
  *     tags: [Auth]
  *     summary: Verify OTP and login/register employee
+ *     description: >
+ *       The code is 4-8 digits (the SMS gateway sends 4). 400 for a wrong or
+ *       expired code, 429 once the attempt cap is reached — a fresh code is
+ *       then required.
  */
 router.post('/employee/otp/verify', validate(otpVerifySchema), asyncHandler(authController.verifyEmployeeOtp));
 router.post('/employee/google', validate(employeeGoogleSchema), asyncHandler(authController.employeeGoogleLogin));

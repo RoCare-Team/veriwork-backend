@@ -11,9 +11,13 @@ export const phoneSchema = z.object({
   phone: phoneField,
 });
 
+// The gateway sends a 4-digit code, the dev mock and the demo numbers a 6-digit
+// one, so the length is a range rather than a fixed count.
 export const otpVerifySchema = z.object({
   phone: z.string().min(10),
-  code: z.string().length(6, 'OTP must be 6 digits'),
+  code: z
+    .string({ required_error: 'OTP is required' })
+    .regex(/^\d{4,8}$/, 'OTP must be 4 to 8 digits'),
 });
 
 export const employeeGoogleSchema = z.object({

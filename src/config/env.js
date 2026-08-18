@@ -54,6 +54,30 @@ export const env = Object.freeze({
     expiresMinutes:
       Number(process.env.OTP_EXPIRES_MINUTES) || 10,
 
+    // Digits in the code. The shared gateway sends 4; the local mock and the
+    // savshka sender follow whatever is set here so one length rules the UI.
+    length: Number(process.env.OTP_LENGTH) || 4,
+
+    // Throttling. The gateway does not rate-limit, so this is ours to enforce:
+    // a resend cooldown and an hourly cap keep anyone from running up an SMS
+    // bill, and an attempt cap stops a short code being guessed.
+    resendSeconds: Number(process.env.OTP_RESEND_SECONDS) || 30,
+    maxPerHour: Number(process.env.OTP_MAX_PER_HOUR) || 5,
+    windowMs: 60 * 60 * 1000,
+    maxAttempts: Number(process.env.OTP_MAX_ATTEMPTS) || 5,
+
+    // Shared SMS gateway that generates, sends AND verifies the code. Turns on
+    // as soon as both URLs are set; otherwise OTP falls back to the savshka
+    // sender below, or to the dev mock code when that is unconfigured too.
+    gateway: {
+      enabled: Boolean(process.env.OTP_SEND_URL && process.env.OTP_VERIFY_URL),
+      sendUrl: process.env.OTP_SEND_URL || "",
+      verifyUrl: process.env.OTP_VERIFY_URL || "",
+      token: process.env.OTP_TOKEN || "",
+      // The gateway keeps a list of permitted sources and rejects the rest.
+      source: process.env.OTP_SOURCE || "pagerLook",
+    },
+
     // Test numbers that always get a fixed OTP and never trigger a real SMS —
     // used for app-store/demo logins where a live SMS can't be received.
     // Comma-separated in OTP_TEST_PHONES; stored normalized (+91XXXXXXXXXX).
@@ -76,7 +100,7 @@ export const env = Object.freeze({
     entityId: process.env.SMS_ENTITY_ID || "",
     otpTemplateId: process.env.SMS_OTP_TEMPLATE_ID || "",
     // Brand name embedded in the registered DLT template text.
-    brandName: process.env.SMS_BRAND_NAME || "Ro Care India",
+    brandName: process.env.SMS_BRAND_NAME || "PagerLook",
   },
 
   upload: {
