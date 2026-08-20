@@ -11,6 +11,8 @@ import {
   reviewAadhaarSchema,
   adminVerificationRequestsQuerySchema,
   adminResendVerificationSchema,
+  adminDemoRequestsQuerySchema,
+  updateDemoRequestSchema,
 } from '../validators/adminValidators.js';
 import * as adminController from '../controllers/adminController.js';
 
@@ -72,6 +74,18 @@ router.post(
   '/companies/:id/messages',
   validate(onboardingMessageSchema),
   asyncHandler(adminController.postCompanyMessage),
+);
+
+// Demo requests filed from the public site
+router.get(
+  '/demo-requests',
+  validate(adminDemoRequestsQuerySchema, 'query'),
+  asyncHandler(adminController.listDemoRequests),
+);
+router.patch(
+  '/demo-requests/:id',
+  validate(updateDemoRequestSchema),
+  asyncHandler(adminController.updateDemoRequest),
 );
 
 export default router;

@@ -62,3 +62,17 @@ export const publicVerificationRespondSchema = z.object({
   verifierPhone: z.string().max(20).optional(),
   declarationAccepted: z.boolean().optional(),
 });
+
+// "Book a demo" from the landing page — a lead, not an account, so only the
+// details a sales call actually needs are required.
+export const demoRequestSchema = z.object({
+  name: z.string().trim().min(2, 'Your name is required').max(120),
+  email: z.string().trim().email('Valid email is required').max(200),
+  phone: z
+    .string()
+    .trim()
+    .refine((v) => v.replace(/\D/g, '').length >= 10, 'A 10-digit mobile number is required'),
+  company: z.string().trim().max(150).optional().or(z.literal('')),
+  teamSize: z.string().trim().max(40).optional().or(z.literal('')),
+  message: z.string().trim().max(1000).optional().or(z.literal('')),
+});

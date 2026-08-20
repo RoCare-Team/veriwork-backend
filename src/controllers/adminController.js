@@ -2,6 +2,7 @@ import * as adminService from '../services/adminService.js';
 import * as onboardingReviewService from '../services/onboardingReviewService.js';
 import * as aadhaarVerificationService from '../services/aadhaarVerificationService.js';
 import * as verificationRequestService from '../services/verificationRequestService.js';
+import * as demoRequestService from '../services/demoRequestService.js';
 
 export async function reviewCompanyDocument(req, res) {
   const data = await onboardingReviewService.reviewOnboardingDocument(
@@ -100,4 +101,17 @@ export async function reviewAadhaarRequest(req, res) {
     req.body,
   );
   res.json({ success: true, data: result });
+}
+
+export async function listDemoRequests(req, res) {
+  const data = await demoRequestService.listDemoRequests({
+    status: req.query.status,
+    q: req.query.q,
+  });
+  res.json({ success: true, data });
+}
+
+export async function updateDemoRequest(req, res) {
+  const data = await demoRequestService.updateDemoRequest(req.user._id, req.params.id, req.body);
+  res.json({ success: true, data });
 }

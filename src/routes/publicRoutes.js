@@ -8,6 +8,7 @@ import {
   publicVerificationRespondSchema,
   acceptCompanyUserInviteSchema,
   qrJoinRequestSchema,
+  demoRequestSchema,
 } from '../validators/publicValidators.js';
 
 const router = Router();
@@ -42,5 +43,9 @@ router.post(
   validate(publicVerificationRespondSchema),
   asyncHandler(publicController.respondEmploymentVerification),
 );
+
+// "Book a demo" from the landing page — open on purpose: the visitor has no
+// account yet. demoRequestService caps how often one email/phone may file.
+router.post('/demo-requests', validate(demoRequestSchema), asyncHandler(publicController.submitDemoRequest));
 
 export default router;

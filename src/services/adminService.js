@@ -1,4 +1,5 @@
 import { AadhaarVerification } from '../models/AadhaarVerification.js';
+import { countNewDemoRequests } from './demoRequestService.js';
 import { Company } from '../models/Company.js';
 import { CompanyOnboarding } from '../models/CompanyOnboarding.js';
 import { EmployeeProfile } from '../models/EmployeeProfile.js';
@@ -60,6 +61,7 @@ export async function getDashboardStats() {
     employeesProfileComplete,
     employeesVerified,
     aadhaarPending,
+    demoRequestsNew,
   ] = await Promise.all([
     CompanyOnboarding.countDocuments({ status: 'submitted' }),
     CompanyOnboarding.countDocuments({ status: 'approved' }),
@@ -70,6 +72,7 @@ export async function getDashboardStats() {
     EmployeeProfile.countDocuments({ profileSetupComplete: true }),
     EmployeeProfile.countDocuments({ aadhaarVerified: true, biometricVerified: true }),
     AadhaarVerification.countDocuments({ status: 'pending' }),
+    countNewDemoRequests(),
   ]);
 
   return {
@@ -82,6 +85,7 @@ export async function getDashboardStats() {
     employeesProfileComplete,
     employeesVerified,
     aadhaarPending,
+    demoRequestsNew,
   };
 }
 

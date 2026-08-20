@@ -3,6 +3,7 @@ import * as verificationRequestService from '../services/verificationRequestServ
 import * as publicProfileService from '../services/publicProfileService.js';
 import * as companyUsersService from '../services/companyUsersService.js';
 import * as qrOnboardingService from '../services/qrOnboardingService.js';
+import * as demoRequestService from '../services/demoRequestService.js';
 
 export async function getQrJoinInfo(req, res) {
   const data = await qrOnboardingService.getQrJoinInfo(req.params.code);
@@ -57,5 +58,10 @@ export async function uploadEmploymentVerificationDocument(req, res) {
     req.params.token,
     req.file,
   );
+  res.status(201).json({ success: true, data });
+}
+
+export async function submitDemoRequest(req, res) {
+  const data = await demoRequestService.createDemoRequest(req.body);
   res.status(201).json({ success: true, data });
 }

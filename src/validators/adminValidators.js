@@ -72,3 +72,16 @@ export const reviewCompanySchema = z.object({
   (data) => data.status !== 'rejected' || (data.reason && data.reason.trim().length > 0),
   { message: 'Rejection reason is required', path: ['reason'] },
 );
+
+// Demo request desk — filter the lead list, then work a lead through it.
+export const adminDemoRequestsQuerySchema = z.object({
+  status: z.enum(['all', 'new', 'contacted', 'scheduled', 'closed']).optional().default('all'),
+  q: z.string().max(100).optional(),
+});
+
+export const updateDemoRequestSchema = z.object({
+  status: z.enum(['new', 'contacted', 'scheduled', 'closed']).optional(),
+  notes: z.string().max(2000).optional(),
+}).refine((d) => d.status !== undefined || d.notes !== undefined, {
+  message: 'Nothing to update',
+});
