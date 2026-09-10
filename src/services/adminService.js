@@ -1,12 +1,26 @@
 import { AadhaarVerification } from '../models/AadhaarVerification.js';
 import { countNewDemoRequests } from './demoRequestService.js';
+import { AccessRequest } from '../models/AccessRequest.js';
+import { ActivityLog } from '../models/ActivityLog.js';
 import { Company } from '../models/Company.js';
+import { CompanyEmployee } from '../models/CompanyEmployee.js';
+import { CompanyEmployeeInvitation } from '../models/CompanyEmployeeInvitation.js';
 import { CompanyOnboarding } from '../models/CompanyOnboarding.js';
+import { Document } from '../models/Document.js';
 import { EmployeeProfile } from '../models/EmployeeProfile.js';
+import { Endorsement } from '../models/Endorsement.js';
+import { JobExperience } from '../models/JobExperience.js';
 import { JoinRequest } from '../models/JoinRequest.js';
+import { OtpSession } from '../models/OtpSession.js';
+import { PublicProfileAccessRequest } from '../models/PublicProfileAccessRequest.js';
+import { RefreshToken } from '../models/RefreshToken.js';
 import { User } from '../models/User.js';
+import { VaultItem } from '../models/VaultItem.js';
+import { VerificationRequest } from '../models/VerificationRequest.js';
 import { ApiError } from '../utils/ApiError.js';
+import { deleteStoredFile } from '../utils/fileUpload.js';
 import { getInitials } from '../utils/idGenerators.js';
+import { assertValidObjectId } from '../utils/objectId.js';
 import { mapDocumentReviews } from './onboardingReviewService.js';
 
 function formatCompanyApplication(company, onboarding, adminUser) {
@@ -270,6 +284,203 @@ export async function getEmployee(userId) {
           faceMatchMatched: aadhaar.faceMatch?.matched || false,
         }
       : null,
+  };
+}
+
+/**
+ * Load the employee behind an admin action, rejecting anything that isn't a
+ * real employee account — a platform admin or company user must never be
+ * reachable through the employee endpoints.
+ */
+async function requireEmployeeUser(userId) {
+  const validId = assertValidObjectId(userId, 'employee id');
+  const user = await User.findOne({ _id: validId, role: 'employee' });
+  if (!user) throw ApiError.notFound('Employee not found');
+  return user;
+}
+
+/**
+ * Deactivate or restore an employee account.
+ *
+ * The reversible half of "remove this employee": `isActive:false` is what the
+ * auth middleware already checks, so the account stops being able to log in
+ * immediately, while every verification record companies rely on stays intact.
+ * Deactivating also revokes refresh tokens, otherwise a session issued minutes
+ * ago would keep working until its access token expired.
+ */
+export async function setEmployeeActive(adminUserId, userId, isActive) {
+  const user = await requireEmployeeUser(userId);
+  const next = Boolean(isActive);
+
+  if (user.isActive === next) {
+    return { id: user._id, isActive: next, changed: false };
+  }
+
+  user.isActive = next;
+  await user.save();
+
+  if (!next) {
+    await RefreshToken.updateMany(
+      { userId: user._id, revokedAt: null },
+      { $set: { revokedAt: new Date() } },
+    );
+  }
+
+  console.log(
+    `[admin] ${next ? 'reactivated' : 'deactivated'} employee ${user._id} by admin ${adminUserId}`,
+  );
+
+  return { id: user._id, isActive: next, changed: true };
+}
+
+/**
+ * Every uploaded file belonging to an employee, so a purge takes the bytes out
+ * of S3 (or off disk) and not just the rows pointing at them. Aadhaar card
+ * scans and the liveness selfie matter most here — they are the most sensitive
+ * thing the platform holds.
+ */
+function collectEmployeeFiles({ profile, documents, aadhaar }) {
+  const files = [];
+
+  if (profile?.photoUrl) files.push({ url: profile.photoUrl });
+  for (const doc of documents) {
+    if (doc.url) files.push({ url: doc.url });
+  }
+  if (aadhaar) {
+    for (const image of [aadhaar.frontImage, aadhaar.backImage]) {
+      if (image?.url || image?.key) files.push({ url: image.url || '', key: image.key || '' });
+    }
+    if (aadhaar.faceMatch?.selfieUrl) files.push({ url: aadhaar.faceMatch.selfieUrl });
+  }
+
+  return files;
+}
+
+/**
+ * Permanently erase an employee and everything the platform holds about them.
+ *
+ * This is the irreversible half of removal — for spam/test accounts and for
+ * "delete my data" requests — so it is deliberately awkward to trigger:
+ * `confirm` must match the employee's own name or PagerLook ID, which the
+ * caller can only know by having the right record open.
+ *
+ * Records other companies hold about this person go too (verification requests,
+ * endorsements, roster entries), because a half-erased employee still leaves
+ * their name and history sitting in someone else's dashboard.
+ *
+ * Deliberately NOT run in a transaction: that would need a replica set and
+ * would break local single-node development. Instead the User row is deleted
+ * last, so a failure part-way leaves the account still visible in the console
+ * and the purge simply re-runnable, rather than orphaning data behind a
+ * vanished user.
+ */
+export async function deleteEmployee(adminUserId, userId, { confirm } = {}) {
+  const user = await requireEmployeeUser(userId);
+  const profile = await EmployeeProfile.findOne({ userId: user._id }).lean();
+
+  const expected = [profile?.name, profile?.veriworkId, user.email]
+    .filter(Boolean)
+    .map((value) => value.trim().toLowerCase());
+  const given = String(confirm || '').trim().toLowerCase();
+
+  if (!given || !expected.includes(given)) {
+    throw ApiError.badRequest(
+      "Type the employee's name or PagerLook ID exactly to confirm permanent deletion",
+    );
+  }
+
+  const id = user._id;
+
+  // Read the file-bearing records before their rows go, so we still know which
+  // objects to remove from storage.
+  const [documents, aadhaar] = await Promise.all([
+    Document.find({ userId: id }).lean(),
+    AadhaarVerification.findOne({ userId: id }).lean(),
+  ]);
+  const files = collectEmployeeFiles({ profile, documents, aadhaar });
+
+  const [
+    activityLogs,
+    docs,
+    vaultItems,
+    jobExperiences,
+    aadhaarRecords,
+    verificationRequests,
+    endorsements,
+    companyEmployees,
+    invitations,
+    joinRequests,
+    accessRequests,
+    publicProfileRequests,
+    refreshTokens,
+    profiles,
+  ] = await Promise.all([
+    ActivityLog.deleteMany({ userId: id }),
+    Document.deleteMany({ userId: id }),
+    VaultItem.deleteMany({ userId: id }),
+    JobExperience.deleteMany({ userId: id }),
+    AadhaarVerification.deleteMany({ userId: id }),
+    // Only requests *about* this employee. A row where they merely appear as
+    // requester or responder belongs to someone else's history.
+    VerificationRequest.deleteMany({ employeeId: id }),
+    Endorsement.deleteMany({ $or: [{ employeeId: id }, { endorsedBy: id }] }),
+    CompanyEmployee.deleteMany({ employeeId: id }),
+    CompanyEmployeeInvitation.deleteMany({ employeeId: id }),
+    JoinRequest.deleteMany({ candidateUserId: id }),
+    AccessRequest.deleteMany({ $or: [{ employeeId: id }, { employeeUserId: id }] }),
+    PublicProfileAccessRequest.deleteMany({ employeeUserId: id }),
+    RefreshToken.deleteMany({ userId: id }),
+    EmployeeProfile.deleteMany({ userId: id }),
+  ]);
+
+  // Colleagues who reported to this person keep their roster row — it just
+  // loses a manager, rather than being deleted along with them.
+  await CompanyEmployee.updateMany(
+    { reportingManagerId: id },
+    { $set: { reportingManagerId: null } },
+  );
+
+  // OTP sessions are keyed by phone number, not user id.
+  if (user.phone) await OtpSession.deleteMany({ phone: user.phone });
+
+  const filesDeleted = (
+    await Promise.all(files.map((file) => deleteStoredFile(file.url, file.key)))
+  ).filter(Boolean).length;
+
+  await User.deleteOne({ _id: id });
+
+  const counts = {
+    activityLogs: activityLogs.deletedCount,
+    documents: docs.deletedCount,
+    vaultItems: vaultItems.deletedCount,
+    jobExperiences: jobExperiences.deletedCount,
+    aadhaarRecords: aadhaarRecords.deletedCount,
+    verificationRequests: verificationRequests.deletedCount,
+    endorsements: endorsements.deletedCount,
+    companyRosterEntries: companyEmployees.deletedCount,
+    invitations: invitations.deletedCount,
+    joinRequests: joinRequests.deletedCount,
+    accessRequests: accessRequests.deletedCount,
+    publicProfileRequests: publicProfileRequests.deletedCount,
+    refreshTokens: refreshTokens.deletedCount,
+    profiles: profiles.deletedCount,
+    files: filesDeleted,
+  };
+
+  // There is no platform-level audit collection, and the employee's own
+  // ActivityLog rows are gone — so this line is the only lasting record that
+  // the deletion happened. Keep it structured and greppable.
+  console.log(
+    `[admin] PERMANENTLY DELETED employee ${id} (${profile?.veriworkId || 'no id'}) ` +
+      `by admin ${adminUserId} :: ${JSON.stringify(counts)}`,
+  );
+
+  return {
+    id,
+    deleted: true,
+    name: profile?.name || '',
+    veriworkId: profile?.veriworkId || '',
+    counts,
   };
 }
 

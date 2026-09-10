@@ -1,4 +1,4 @@
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import path from 'path';
 import { env } from '../config/env.js';
 import { ApiError } from '../utils/ApiError.js';
@@ -53,4 +53,42 @@ export async function uploadFileToS3(file, folder = 'uploads') {
     mimeType: file.mimetype,
     size: file.size,
   };
+}
+
+/**
+ * Recover the object key from a stored URL, so a record that only kept the
+ * public URL (older documents did) can still have its object removed.
+ * Returns '' for anything that isn't an object in our bucket.
+ */
+export function s3KeyFromUrl(url) {
+  if (!url || typeof url !== 'string') return '';
+  try {
+    const { hostname, pathname } = new URL(url);
+    if (!hostname.includes('.s3.') && !hostname.startsWith('s3.')) return '';
+    // Both bucket-in-host and bucket-in-path URL styles resolve to the same key.
+    const decoded = decodeURIComponent(pathname.replace(/^\//, ''));
+    return hostname.startsWith(`${env.aws.bucket}.`)
+      ? decoded
+      : decoded.replace(new RegExp(`^${env.aws.bucket}/`), '');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Remove one object. Best-effort by design: this is called while purging a
+ * deleted account, and a missing or already-removed object must not abort the
+ * rest of the purge.
+ */
+export async function deleteFileFromS3(key) {
+  if (!env.aws.enabled || !key) return false;
+  try {
+    await getClient().send(
+      new DeleteObjectCommand({ Bucket: env.aws.bucket, Key: key }),
+    );
+    return true;
+  } catch (err) {
+    console.error(`[s3] failed to delete ${key}: ${err.message}`);
+    return false;
+  }
 }

@@ -1,20 +1,22 @@
 import { env } from '../config/env.js';
+import { isMailApiEnabled, sendTransactionalEmail } from './mailApiService.js';
 
 /**
  * Centralized email service.
  *
- * Every module in the app sends mail through this one file, and every send is
- * driven entirely by the SMTP_* environment variables (see .env.example). The
- * app is therefore provider-agnostic: moving from Gmail to Amazon SES, or
- * changing the sender to verification@/support@/noreply@pagerlook.com, is a
- * config change only — no code changes anywhere.
+ * Every module in the app sends mail through this one file, and which wire it
+ * actually leaves on is pure config — no code change is needed to move providers.
  *
- * Two ways mail goes out:
- *   • Global transport  — from SMTP_* env (the default for all system email).
- *   • Per-company SMTP  — an explicit config passed by the caller (companySmtp),
- *                         used so a company's verification mail comes from them.
- * If neither is usable, we fall back to a safe "mock" mode that logs instead of
- * sending, so flows never break when SMTP is not configured (e.g. local dev).
+ * Routes are tried in order, first success wins:
+ *   1. Per-company SMTP — an explicit config passed by the caller (companySmtp),
+ *      so a company's verification mail genuinely comes from their mailbox.
+ *      Skipped when MAIL_API_FORCE=true.
+ *   2. Mail Studio API  — MAIL_API_KEY. The default path for every platform
+ *      email: password resets, verification requests, invites, notifications.
+ *   3. SMTP (verification@ mailbox for the verification channel, else the
+ *      global SMTP_* account) — the safety net for when the API is unreachable.
+ *   4. Mock mode — logs instead of sending, so local dev flows never break when
+ *      nothing is configured.
  */
 
 let transporterPromise = null;
@@ -118,22 +120,6 @@ async function createSmtpTransport(config) {
     ...(secure ? {} : { requireTLS: port === 587 }),
     auth: { user: config.username, pass: config.password },
   });
-}
-
-/**
- * Resolve which transporter + from-address to use for a given send.
- * Prefers the caller-supplied company SMTP config, then the global env SMTP,
- * then falls back to mock mode.
- */
-async function resolveTransport(companySmtp) {
-  if (companySmtp) {
-    const transport = await createSmtpTransport(companySmtp);
-    if (transport) {
-      return { transport, from: companySmtp.from || companySmtp.senderEmail || env.email.from };
-    }
-  }
-  const transport = await getTransporter();
-  return { transport, from: env.email.from };
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -255,17 +241,20 @@ function renderEmail({ heading, preheader = '', bodyHtml = '', cta, footerNote =
  * ──────────────────────────────────────────────────────────────────────────── */
 
 /**
- * Send one email. Resolves the transport (per-company → env → mock), sends, and
- * never throws: on failure it returns { sent:false, error } so callers can
+ * Send one email. Walks the route list (company SMTP → Mail API → SMTP → mock)
+ * and never throws: on failure it returns { sent:false, error } so callers can
  * record delivery state without the surrounding flow breaking.
  *
  * @param {object} opts
  * @param {string} opts.to
+ * @param {string} [opts.cc]
  * @param {string} opts.subject
  * @param {string} opts.html
  * @param {string} opts.text
  * @param {object|null} [opts.companySmtp] Explicit per-company SMTP config.
- * @param {string} [opts.category] Label used only for mock-mode logging.
+ * @param {'verification'|null} [opts.channel] Picks the verification@ mailbox
+ *        when falling back to SMTP.
+ * @param {string} [opts.category] Label used in send logs and mock mode.
  * @param {string[]} [opts.logLinks] Extra links to print in mock mode.
  */
 async function sendEmail({
@@ -279,7 +268,7 @@ async function sendEmail({
   category = 'email',
   logLinks = [],
 }) {
-  const deliver = async (transport, from, via) => {
+  const deliverSmtp = async (transport, from, via) => {
     const message = { from, to, subject, text, html };
     if (cc) message.cc = cc;
     if (env.email.replyTo) message.replyTo = env.email.replyTo;
@@ -288,47 +277,78 @@ async function sendEmail({
     return { sent: true, mock: false };
   };
 
-  // Pick the primary transport: an explicit per-company config wins; otherwise
-  // verification email uses the dedicated verification@ mailbox; else global.
-  let primary;
-  let primaryLabel;
-  if (companySmtp) {
-    primary = await resolveTransport(companySmtp);
-    primaryLabel = 'company SMTP';
-  } else if (channel === 'verification') {
-    const vt = await getVerificationTransporter();
-    primary = vt ? { transport: vt, from: env.email.verification.from } : await resolveTransport(null);
-    primaryLabel = vt ? 'verification SMTP' : 'global SMTP';
-  } else {
-    primary = await resolveTransport(null);
-    primaryLabel = 'global SMTP';
+  const deliverApi = async () => {
+    const { messageId } = await sendTransactionalEmail({ to, cc, subject, html, text });
+    console.log(
+      `[email] sent "${category}" to ${to}${cc ? ` (cc ${cc})` : ''} via Mail API${messageId ? ` (${messageId})` : ''}`,
+    );
+    return { sent: true, mock: false, messageId };
+  };
+
+  // Build the ordered route list for this send. A route returning null means
+  // "not configured, try the next one"; a throw means it was configured and
+  // failed, which is worth logging before falling through.
+  const routes = [];
+
+  // A company that saved its own SMTP wants mail to come from its own mailbox,
+  // so that config still leads — unless MAIL_API_FORCE routes everything to the API.
+  if (companySmtp && !env.email.api.force) {
+    routes.push({
+      label: 'company SMTP',
+      run: async () => {
+        const transport = await createSmtpTransport(companySmtp);
+        if (!transport) return null;
+        const from = companySmtp.from || companySmtp.senderEmail || env.email.from;
+        return deliverSmtp(transport, from, 'company SMTP');
+      },
+    });
   }
 
-  // Try the primary transport, then fall back to the global one on failure.
-  if (primary.transport) {
+  // The Mail Studio HTTP API — the default sender for all platform email.
+  if (isMailApiEnabled()) {
+    routes.push({ label: 'Mail API', run: deliverApi });
+  }
+
+  // SMTP fallbacks, only reached when the API is down or unconfigured.
+  if (channel === 'verification') {
+    routes.push({
+      label: 'verification SMTP',
+      run: async () => {
+        const transport = await getVerificationTransporter();
+        if (!transport) return null;
+        return deliverSmtp(transport, env.email.verification.from, 'verification SMTP');
+      },
+    });
+  }
+
+  routes.push({
+    label: 'global SMTP',
+    run: async () => {
+      const transport = await getTransporter();
+      if (!transport) return null;
+      return deliverSmtp(transport, env.email.from, 'global SMTP');
+    },
+  });
+
+  let lastError = null;
+  for (const route of routes) {
     try {
-      return await deliver(primary.transport, primary.from, primaryLabel);
+      const result = await route.run();
+      if (result) return result;
     } catch (err) {
-      console.error(`[email] "${category}" to ${to} via ${primaryLabel} failed: ${err.message}`);
-      // A broken company/verification config must not block delivery — fall back
-      // to the platform's own global SMTP account (the one that always works).
-      if (primaryLabel !== 'global SMTP') {
-        const globalTransport = await getTransporter();
-        if (globalTransport) {
-          try {
-            return await deliver(globalTransport, env.email.from, 'global SMTP (fallback)');
-          } catch (fallbackErr) {
-            console.error(`[email] "${category}" to ${to} global fallback failed: ${fallbackErr.message}`);
-            return { sent: false, mock: false, error: fallbackErr.message };
-          }
-        }
-      }
-      return { sent: false, mock: false, error: err.message };
+      lastError = err;
+      console.error(`[email] "${category}" to ${to} via ${route.label} failed: ${err.message}`);
     }
   }
 
-  // No usable transport anywhere → mock (SMTP not configured).
-  console.log(`[email:mock] ${category} → ${to} :: ${subject}  (SMTP not configured — set SMTP_* in .env)`);
+  // Every configured route failed — report it without throwing, so the calling
+  // flow can record delivery state and carry on.
+  if (lastError) return { sent: false, mock: false, error: lastError.message };
+
+  // Nothing configured at all → mock mode.
+  console.log(
+    `[email:mock] ${category} → ${to} :: ${subject}  (no mail transport configured — set MAIL_API_KEY in .env)`,
+  );
   for (const link of logLinks) console.log(`  Link: ${link}`);
   return { sent: false, mock: true };
 }

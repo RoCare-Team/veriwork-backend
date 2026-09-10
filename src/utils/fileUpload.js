@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { env } from '../config/env.js';
-import { uploadFileToS3 } from '../services/s3Service.js';
+import { deleteFileFromS3, s3KeyFromUrl, uploadFileToS3 } from '../services/s3Service.js';
 
 const uploadDir = path.resolve(env.upload.dir);
 
@@ -55,5 +55,34 @@ export async function readLocalUpload(url) {
     return await fs.promises.readFile(filePath);
   } catch {
     return null;
+  }
+}
+
+/**
+ * Delete a file previously written by storeUploadedFile, wherever it landed —
+ * an S3 object or a local /uploads/<name>. Used when purging a deleted account,
+ * so it never throws: a file that is already gone is simply reported as false.
+ *
+ * @param {string} url  The stored URL (S3 public URL or /uploads/<name>).
+ * @param {string} [key] The S3 object key when the record kept one; otherwise
+ *                       it is recovered from the URL.
+ */
+export async function deleteStoredFile(url, key = '') {
+  if (!url && !key) return false;
+
+  const objectKey = key || s3KeyFromUrl(url);
+  if (objectKey) return deleteFileFromS3(objectKey);
+
+  if (typeof url !== 'string' || !url.startsWith('/uploads/')) return false;
+
+  const filePath = path.join(uploadDir, path.basename(url));
+  // Same traversal guard as readLocalUpload — never unlink outside uploadDir.
+  if (path.dirname(path.resolve(filePath)) !== uploadDir) return false;
+
+  try {
+    await fs.promises.unlink(filePath);
+    return true;
+  } catch {
+    return false;
   }
 }

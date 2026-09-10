@@ -64,6 +64,24 @@ export async function getEmployee(req, res) {
   res.json({ success: true, data: employee });
 }
 
+/** Deactivate or restore an employee account (reversible). */
+export async function setEmployeeStatus(req, res) {
+  const data = await adminService.setEmployeeActive(
+    req.user._id,
+    req.params.id,
+    req.body.isActive,
+  );
+  res.json({ success: true, data });
+}
+
+/** Permanently erase an employee and everything held about them. */
+export async function deleteEmployee(req, res) {
+  const data = await adminService.deleteEmployee(req.user._id, req.params.id, {
+    confirm: req.body.confirm,
+  });
+  res.json({ success: true, data });
+}
+
 export async function listVerificationRequests(req, res) {
   const data = await verificationRequestService.listVerificationRequestsForAdmin({
     status: req.query.status,

@@ -13,6 +13,8 @@ import {
   adminResendVerificationSchema,
   adminDemoRequestsQuerySchema,
   updateDemoRequestSchema,
+  setEmployeeStatusSchema,
+  deleteEmployeeSchema,
 } from '../validators/adminValidators.js';
 import * as adminController from '../controllers/adminController.js';
 
@@ -27,6 +29,21 @@ router.get(
   asyncHandler(adminController.listEmployees),
 );
 router.get('/employees/:id', asyncHandler(adminController.getEmployee));
+
+// Removing an employee comes in two strengths. Deactivating flips isActive,
+// which blocks login straight away and is undone by sending isActive:true.
+// DELETE is the irreversible purge and needs the employee's name or PagerLook
+// ID echoed back in `confirm`.
+router.patch(
+  '/employees/:id/status',
+  validate(setEmployeeStatusSchema),
+  asyncHandler(adminController.setEmployeeStatus),
+);
+router.delete(
+  '/employees/:id',
+  validate(deleteEmployeeSchema),
+  asyncHandler(adminController.deleteEmployee),
+);
 
 // Employment verification support desk — every request, whoever started it,
 // plus a resend that can fix or extend the HR contact list.

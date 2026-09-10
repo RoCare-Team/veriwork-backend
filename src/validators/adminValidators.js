@@ -85,3 +85,17 @@ export const updateDemoRequestSchema = z.object({
 }).refine((d) => d.status !== undefined || d.notes !== undefined, {
   message: 'Nothing to update',
 });
+
+// Reversible removal — flips User.isActive, which the auth middleware enforces.
+export const setEmployeeStatusSchema = z.object({
+  isActive: z.boolean(),
+});
+
+// Irreversible removal. `confirm` must echo the employee's own name or
+// PagerLook ID, so a permanent delete cannot be fired off by a stray click.
+export const deleteEmployeeSchema = z.object({
+  confirm: z
+    .string()
+    .trim()
+    .min(1, "Type the employee's name or PagerLook ID to confirm"),
+});

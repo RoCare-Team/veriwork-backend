@@ -175,6 +175,30 @@ export const env = Object.freeze({
   // provider (Gmail today, Amazon SES later) can be swapped without code changes.
   email: {
     enabled: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
+
+    // ── Limbu Mail Studio HTTP API — the primary sender for ALL system email ──
+    // Password resets, employment-verification mail, invites, notifications:
+    // everything goes out over this HTTPS API instead of a raw SMTP socket, so
+    // there is no connection pool to exhaust and no mailbox password on the box.
+    // The sending identity (domain/from address) lives in the Mail Studio
+    // account attached to MAIL_API_KEY, not here. SMTP_* below stays as the
+    // automatic fallback for when the API is unreachable.
+    api: {
+      enabled: Boolean(process.env.MAIL_API_KEY),
+      baseUrl: (process.env.MAIL_API_URL || "https://mail.limbutech.in").trim().replace(/\/$/, ""),
+      apiKey: (process.env.MAIL_API_KEY || "").trim(),
+      timeoutMs: Number(process.env.MAIL_API_TIMEOUT_MS) || 20000,
+      // Network/5xx retries. Transactional mail is worth one more try.
+      retries: Number(process.env.MAIL_API_RETRIES) || 2,
+      // Optional overrides — the account's verified sender is used when unset.
+      from: process.env.MAIL_API_FROM || "",
+      fromName: process.env.MAIL_API_FROM_NAME || "",
+      // When true, even companies with their own SMTP saved are sent through
+      // the API. Off by default so the per-company "send from your own mailbox"
+      // feature keeps working.
+      force: process.env.MAIL_API_FORCE === "true",
+    },
+
     // From-address. SMTP_FROM is the canonical name; EMAIL_FROM kept as a fallback.
     // If neither carries a display name, we still send a clean "PagerLook <user>".
     from:
