@@ -32,6 +32,7 @@ import {
   generateRegistrationToken,
   sendInvitationNotifications,
   buildEmployeeJoinLink,
+  INVITATION_TOKEN_DAYS,
 } from './invitationService.js';
 import { env } from '../config/env.js';
 import { sendAccessRequestEmail } from './emailService.js';
@@ -79,17 +80,51 @@ async function createCompanyAuditLog({
   }
 }
 
-async function resolveEmployee({ employeeEmail, employeeMobile, employeePagerlookId }) {
-  const profileFilter = [];
-  if (employeeEmail) profileFilter.push({ email: employeeEmail.toLowerCase() });
-  if (employeeMobile) profileFilter.push({ phone: employeeMobile });
-  if (employeePagerlookId) profileFilter.push({ veriworkId: employeePagerlookId });
+/**
+ * Find the registered employee an invite is aimed at.
+ *
+ * `employeeUserId` is what the search picker sends and is authoritative — the
+ * company literally chose that person out of a result list. The rest are typed
+ * by hand and are matched the same way search matches them, so an employee who
+ * is findable by search is never then treated as unregistered:
+ *   • PagerLook ID — exact, case-insensitive.
+ *   • Mobile       — on the last 10 digits, since profiles store "+91…" and the
+ *                    invite form asks for a plain 10-digit number.
+ *
+ * Returns the whole profile rather than just an id, so the caller can copy the
+ * employee's own contact details onto the invitation.
+ */
+async function resolveEmployeeProfile({
+  employeeUserId,
+  employeeEmail,
+  employeeMobile,
+  employeePagerlookId,
+}) {
+  if (employeeUserId) {
+    const byId = await EmployeeProfile.findOne({
+      userId: assertValidObjectId(employeeUserId, 'employee id'),
+    });
+    if (byId) return byId;
+  }
 
-  if (!profileFilter.length) return null;
+  const filters = [];
+  if (employeeEmail) filters.push({ email: employeeEmail.toLowerCase() });
+  if (employeeMobile) {
+    const digits = employeeMobile.replace(/\D/g, '').slice(-10);
+    if (digits.length === 10) filters.push({ phone: new RegExp(`${digits}$`) });
+  }
+  if (employeePagerlookId) {
+    // PagerLook IDs are letters, digits and dashes only — nothing in that set
+    // is a regex metacharacter, so there is nothing to escape, and anything
+    // containing something else cannot be an ID and is simply ignored.
+    const id = employeePagerlookId.trim();
+    if (/^[A-Za-z0-9-]+$/.test(id)) {
+      filters.push({ veriworkId: new RegExp(`^${id}$`, 'i') });
+    }
+  }
 
-  const profile = await EmployeeProfile.findOne({ $or: profileFilter });
-  if (!profile) return null;
-  return profile.userId;
+  if (!filters.length) return null;
+  return EmployeeProfile.findOne({ $or: filters });
 }
 
 /**
@@ -130,12 +165,24 @@ export async function searchCompanyEmployees(user, query) {
   if (!profiles.length) return [];
 
   const userIds = profiles.map((p) => p.userId);
-  const linked = await CompanyEmployee.find({
-    companyId,
-    employeeId: { $in: userIds },
-    employmentStatus: 'active',
-  }).select('employeeId');
+  const [linked, pendingInvites] = await Promise.all([
+    CompanyEmployee.find({
+      companyId,
+      employeeId: { $in: userIds },
+      employmentStatus: 'active',
+    }).select('employeeId'),
+    // Someone already invited should be shown as such rather than offered as a
+    // fresh pick that fails with a 409 the moment the company hits send.
+    CompanyEmployeeInvitation.find({
+      companyId,
+      employeeId: { $in: userIds },
+      status: { $in: ['pending', 'pending_registration'] },
+    }).select('employeeId'),
+  ]);
   const linkedSet = new Set(linked.map((l) => l.employeeId.toString()));
+  const invitedSet = new Set(
+    pendingInvites.filter((i) => i.employeeId).map((i) => i.employeeId.toString()),
+  );
 
   const maskEmail = (email) => {
     if (!email) return '';
@@ -161,22 +208,54 @@ export async function searchCompanyEmployees(user, query) {
       photoUrl: p.photoUrl || '',
       maskedEmail: maskEmail(p.email),
       maskedMobile: maskMobile(p.phone),
+      // True when this company already has an invitation out to them.
+      alreadyInvited: invitedSet.has(p.userId.toString()),
     }));
 }
 
 export async function inviteEmployee(user, payload) {
   const companyId = requireCompanyId(user);
-  const employeeId = await resolveEmployee(payload);
+
+  // Who is this invite for? A profile match means they are already on PagerLook
+  // and the invite lands in their portal; no match means we generate a
+  // registration link for them to sign up through.
+  const profile = await resolveEmployeeProfile(payload);
+  const employeeId = profile?.userId || null;
   const isRegistered = Boolean(employeeId);
   const status = isRegistered ? 'pending' : 'pending_registration';
 
-  // Unregistered invites are delivered via a shareable registration link. An email
-  // is optional — if provided we also email the link, otherwise the company copies it.
+  if (isRegistered) {
+    // Search already hides current team members, but an invite typed by hand
+    // (or a direct API call) can still name someone who is already on the
+    // roster — say so plainly instead of creating an invitation to nowhere.
+    const alreadyOnTeam = await CompanyEmployee.findOne({
+      companyId,
+      employeeId,
+      employmentStatus: 'active',
+    });
+    if (alreadyOnTeam) {
+      throw ApiError.conflict(
+        `${profile.name || 'This employee'} is already on your team`,
+      );
+    }
+  }
+
+  // For a registered employee, their own profile is the source of truth for
+  // contact details — the company only picked them from a list and never typed
+  // an address. Without this the invitation would carry no email and the
+  // notification would never leave the building.
+  const employeeEmail = (
+    isRegistered ? profile.email || payload.employeeEmail : payload.employeeEmail
+  )?.toLowerCase() || '';
+  const employeeMobile = (isRegistered ? profile.phone : payload.employeeMobile) || '';
+  const employeeVeriworkId = (isRegistered ? profile.veriworkId : payload.employeePagerlookId) || '';
+  // Their own profile name wins, falling back to whatever the company typed.
+  const employeeName = (isRegistered && profile.name) || payload.employeeName?.trim() || '';
 
   const dedupeConditions = [
-    ...(payload.employeeEmail ? [{ employeeEmail: payload.employeeEmail.toLowerCase() }] : []),
-    ...(payload.employeeMobile ? [{ employeeMobile: payload.employeeMobile }] : []),
-    ...(payload.employeePagerlookId ? [{ employeeVeriworkId: payload.employeePagerlookId }] : []),
+    ...(employeeEmail ? [{ employeeEmail }] : []),
+    ...(employeeMobile ? [{ employeeMobile }] : []),
+    ...(employeeVeriworkId ? [{ employeeVeriworkId }] : []),
     ...(employeeId ? [{ employeeId }] : []),
   ];
 
@@ -196,16 +275,16 @@ export async function inviteEmployee(user, payload) {
 
   const registrationToken = isRegistered ? null : generateRegistrationToken();
   const registrationTokenExpiresAt = registrationToken
-    ? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+    ? new Date(Date.now() + INVITATION_TOKEN_DAYS * 24 * 60 * 60 * 1000)
     : null;
 
   const invitation = await CompanyEmployeeInvitation.create({
     companyId,
     employeeId,
-    employeeName: payload.employeeName?.trim() || '',
-    employeeEmail: payload.employeeEmail?.toLowerCase() || '',
-    employeeMobile: payload.employeeMobile || '',
-    employeeVeriworkId: payload.employeePagerlookId || '',
+    employeeName,
+    employeeEmail,
+    employeeMobile,
+    employeeVeriworkId,
     department: payload.department || '',
     designation: payload.designation || '',
     status,
@@ -220,7 +299,7 @@ export async function inviteEmployee(user, payload) {
   const notification = await sendInvitationNotifications({
     invitation,
     companyName: company?.name || 'Company',
-    employeeName: payload.employeeName,
+    employeeName,
     isRegistered,
   });
 
@@ -252,6 +331,8 @@ export async function inviteEmployee(user, payload) {
     caseType: isRegistered ? 'registered' : 'not_registered',
     emailSent: notification.emailSent,
     emailMock: notification.emailMock,
+    // Where the invite actually went, so the UI can say so rather than guess.
+    notifiedEmail: invitation.employeeEmail || '',
     registrationLink: registrationToken ? buildEmployeeJoinLink(registrationToken) : null,
     joinLink: notification.joinLink,
     dashboardStatus: isRegistered ? 'Invitation Sent' : 'Pending Registration',

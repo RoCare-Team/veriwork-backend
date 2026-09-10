@@ -9,7 +9,9 @@ import { env } from '../config/env.js';
 import { CompanyAuditLog } from '../models/CompanyAuditLog.js';
 import { sendEmployeeInvitationEmail } from './emailService.js';
 
-const INVITATION_TOKEN_DAYS = 14;
+// How long a registration link stays usable. Exported so the invite that
+// mints the token and the code that stamps its expiry cannot drift apart.
+export const INVITATION_TOKEN_DAYS = 14;
 
 async function writeInvitationAudit(invitation, userId, autoJoined = false) {
   await CompanyAuditLog.create({

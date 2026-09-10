@@ -2,6 +2,9 @@ import { z } from 'zod';
 
 export const inviteEmployeeSchema = z.object({
   employeeName: z.string().min(1, 'Employee name is required'),
+  // Sent when the employee was picked out of the PagerLook search results —
+  // the only identifier that cannot be mistyped, so it wins over the rest.
+  employeeUserId: z.string().min(1).optional(),
   employeeEmail: z.string().email().optional(),
   employeeMobile: z.string().min(10).optional(),
   employeePagerlookId: z.string().min(3).optional(),
