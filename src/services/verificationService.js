@@ -10,7 +10,7 @@ import {
 } from './scoreService.js';
 import { refreshCachedScore } from './employeeProfileService.js';
 import { formatSubmissionForEmployee } from './aadhaarVerificationService.js';
-import { runFaceVerification } from './faceMatchService.js';
+import { REFERENCE_IMAGE_ERROR, runFaceVerification } from './faceMatchService.js';
 
 const AADHAAR_STEP_DESCRIPTIONS = {
   not_submitted: 'Upload your Aadhaar front and back for verification',
@@ -107,6 +107,10 @@ export async function verifyBiometric(userId, { selfieFile, poseFiles = [] }) {
       referenceImage: record.frontImage,
     });
   } catch (err) {
+    // A broken reference image is not the user's failed attempt — give it back.
+    if (err?.code === REFERENCE_IMAGE_ERROR) {
+      record.faceMatch.attempts = Math.max(0, record.faceMatch.attempts - 1);
+    }
     record.faceMatch.lastError = err?.message || 'Face match failed';
     await record.save();
     throw err;

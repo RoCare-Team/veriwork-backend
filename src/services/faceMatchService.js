@@ -6,6 +6,7 @@ import {
 import { env } from '../config/env.js';
 import { ApiError } from '../utils/ApiError.js';
 import { readLocalUpload } from '../utils/fileUpload.js';
+import { getFileFromS3, s3KeyFromUrl } from './s3Service.js';
 
 let rekognitionClient;
 
@@ -26,21 +27,55 @@ export function isFaceMatchEnabled() {
   return env.faceMatch.enabled;
 }
 
+// Thrown when the stored Aadhaar image itself is the problem (missing, wrong
+// format) — the user's selfie was fine, so the attempt shouldn't count.
+export const REFERENCE_IMAGE_ERROR = 'REFERENCE_IMAGE_ERROR';
+
+function referenceImageError(message) {
+  const err = ApiError.badRequest(message);
+  err.code = REFERENCE_IMAGE_ERROR;
+  return err;
+}
+
+// Rekognition only accepts JPEG and PNG.
+function isJpegOrPng(buffer) {
+  if (!buffer || buffer.length < 4) return false;
+  const isJpeg = buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  const isPng = buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
+  return isJpeg || isPng;
+}
+
 /**
- * Build a Rekognition Image param from a stored image descriptor.
- * S3-backed images are passed by key (no download); locally stored dev uploads
- * are read off disk and sent as bytes.
+ * Build a Rekognition Image param from a stored image descriptor. S3 objects are
+ * downloaded and sent as bytes rather than passed as an S3Object: the S3Object
+ * path needs Rekognition itself to read the bucket (same region, bucket policy,
+ * KMS key), which fails with InvalidS3ObjectException when any of those differ.
  */
 async function toRekognitionImage(stored) {
-  if (stored?.buffer) return { Bytes: stored.buffer };
+  let buffer = stored?.buffer || null;
 
-  if (stored?.key && env.aws.enabled) {
-    return { S3Object: { Bucket: env.aws.bucket, Name: stored.key } };
+  if (!buffer && env.aws.enabled) {
+    const key = stored?.key || s3KeyFromUrl(stored?.url);
+    if (key) {
+      try {
+        buffer = await getFileFromS3(key);
+      } catch (err) {
+        console.error(`[faceMatch] could not download reference image ${key}: ${err.name} ${err.message}`);
+        throw referenceImageError(
+          'Your Aadhaar photo could not be loaded. Please re-upload your Aadhaar card.',
+        );
+      }
+    }
   }
 
-  const buffer = await readLocalUpload(stored?.url);
+  if (!buffer) buffer = await readLocalUpload(stored?.url);
   if (!buffer) {
-    throw ApiError.badRequest('Reference image could not be read for face match');
+    throw referenceImageError('Your Aadhaar photo could not be found. Please re-upload your Aadhaar card.');
+  }
+  if (!isJpegOrPng(buffer)) {
+    throw referenceImageError(
+      'Your Aadhaar card was uploaded as a PDF or unsupported image. Please re-upload the front side as a JPG or PNG photo.',
+    );
   }
   return { Bytes: buffer };
 }
@@ -54,8 +89,11 @@ function describeAwsError(err) {
   if (name === 'ImageTooLargeException') {
     return 'The image is too large for face verification. Try a smaller photo.';
   }
-  if (name === 'InvalidS3ObjectException' || name === 'AccessDeniedException') {
-    return 'The stored Aadhaar image is not readable for face verification.';
+  if (name === 'InvalidImageFormatException') {
+    return 'One of the images is not a valid photo. Retake the selfie and try again.';
+  }
+  if (name === 'AccessDeniedException' || name === 'UnrecognizedClientException') {
+    return 'Face verification is temporarily unavailable. Please try again later.';
   }
   if (name === 'ThrottlingException' || name === 'ProvisionedThroughputExceededException') {
     return 'Face verification is busy right now. Please try again in a moment.';
@@ -222,6 +260,7 @@ export async function runFaceVerification({ selfieBuffer, poseBuffers = [], refe
     };
   } catch (err) {
     if (err instanceof ApiError) throw err;
+    console.error(`[faceMatch] Rekognition error: ${err?.name} ${err?.message}`);
     throw ApiError.badRequest(describeAwsError(err));
   }
 }

@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import path from 'path';
 import { env } from '../config/env.js';
 import { ApiError } from '../utils/ApiError.js';
@@ -91,4 +91,16 @@ export async function deleteFileFromS3(key) {
     console.error(`[s3] failed to delete ${key}: ${err.message}`);
     return false;
   }
+}
+
+/**
+ * Download one object as a Buffer, using the same client that uploaded it — so
+ * it works whatever region/permissions other AWS services (e.g. Rekognition)
+ * would have needed to read the bucket themselves.
+ */
+export async function getFileFromS3(key) {
+  const response = await getClient().send(
+    new GetObjectCommand({ Bucket: env.aws.bucket, Key: key }),
+  );
+  return Buffer.from(await response.Body.transformToByteArray());
 }
