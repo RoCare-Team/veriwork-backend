@@ -28,6 +28,10 @@ const faceMatchSchema = new mongoose.Schema(
     matched: { type: Boolean, default: false },
     livenessPassed: { type: Boolean, default: false },
     selfieUrl: { type: String, default: '' },
+    selfieKey: { type: String, default: '' },
+    // True when the selfie was only captured (FACE_MATCH_MODE=capture) and still
+    // has to be compared against a reference photo (e.g. from DigiLocker).
+    pendingMatch: { type: Boolean, default: false },
     attempts: { type: Number, default: 0 },
     lastAttemptAt: { type: Date, default: null },
     lastError: { type: String, default: '' },

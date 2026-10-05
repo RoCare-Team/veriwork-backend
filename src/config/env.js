@@ -141,6 +141,10 @@ export const env = Object.freeze({
     // printed photo cannot produce this.
     minYawSpread: Number(process.env.FACE_MATCH_MIN_YAW_SPREAD) || 18,
     maxAttempts: Number(process.env.FACE_MATCH_MAX_ATTEMPTS) || 8,
+    // 'capture' (default for now): just store the live selfie, no Rekognition
+    // call and no Aadhaar comparison — the stored selfie is matched later once
+    // DigiLocker provides the reference photo. 'match': full Rekognition flow.
+    mode: process.env.FACE_MATCH_MODE === "match" ? "match" : "capture",
   },
 
   isDev: process.env.NODE_ENV !== "production",

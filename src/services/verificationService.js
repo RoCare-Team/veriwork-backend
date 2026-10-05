@@ -65,6 +65,51 @@ export async function getVerificationStatus(userId) {
   };
 }
 
+// Rekognition (and any future matcher) needs JPEG or PNG.
+function isJpegOrPng(buffer) {
+  if (!buffer || buffer.length < 4) return false;
+  const isJpeg = buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  const isPng = buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
+  return isJpeg || isPng;
+}
+
+/**
+ * Interim biometric step (FACE_MATCH_MODE=capture): no Aadhaar comparison yet.
+ * The live selfie is stored so it can be matched later against the DigiLocker
+ * photo — `pendingMatch` marks the records that still need that.
+ */
+async function captureSelfieOnly(userId, profile, record, selfieFile) {
+  if (!isJpegOrPng(selfieFile.buffer) || selfieFile.buffer.length < 2048) {
+    throw ApiError.badRequest('The selfie could not be read. Please capture it again.');
+  }
+
+  const stored = await storeUploadedFile(selfieFile, 'biometric');
+  record.faceMatch.provider = 'capture';
+  record.faceMatch.selfieUrl = stored?.url || '';
+  record.faceMatch.selfieKey = stored?.key || '';
+  record.faceMatch.matched = false;
+  record.faceMatch.pendingMatch = true;
+  record.faceMatch.lastAttemptAt = new Date();
+  record.faceMatch.lastError = '';
+  record.faceMatch.verifiedAt = new Date();
+
+  profile.biometricVerified = true;
+  if (stored?.url && !profile.photoUrl) {
+    profile.photoUrl = stored.url;
+  }
+
+  await Promise.all([record.save(), profile.save()]);
+  await refreshCachedScore(userId);
+
+  return {
+    message: 'Face captured successfully',
+    biometricVerified: true,
+    provider: 'capture',
+    pendingMatch: true,
+    photoUrl: profile.photoUrl,
+  };
+}
+
 /**
  * The biometric step compares a live selfie against the photo printed on the
  * Aadhaar card an admin already approved — so the reference image is one a
@@ -89,6 +134,9 @@ export async function verifyBiometric(userId, { selfieFile, poseFiles = [] }) {
   }
   if (!selfieFile?.buffer) {
     throw ApiError.badRequest('A live selfie is required for the face match');
+  }
+  if (env.faceMatch.mode === 'capture') {
+    return captureSelfieOnly(userId, profile, record, selfieFile);
   }
   if ((record.faceMatch?.attempts || 0) >= env.faceMatch.maxAttempts) {
     throw ApiError.badRequest(
