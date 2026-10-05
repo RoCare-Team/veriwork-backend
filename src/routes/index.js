@@ -5,6 +5,7 @@ import enterpriseRoutes from './enterpriseRoutes.js';
 import adminRoutes from './adminRoutes.js';
 import companyRoutes from './companyRoutes.js';
 import publicRoutes from './publicRoutes.js';
+import digilockerRoutes from './digilockerRoutes.js';
 
 const router = Router();
 
@@ -14,4 +15,5 @@ router.use('/enterprise', enterpriseRoutes);
 router.use('/company', companyRoutes);
 router.use('/public', publicRoutes);
 router.use('/admin', adminRoutes);
+router.use('/digilocker', digilockerRoutes);
 export default router;

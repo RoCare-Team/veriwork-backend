@@ -171,6 +171,21 @@ export const env = Object.freeze({
     process.env.JWT_ACCESS_SECRET ||
     devDefaults.JWT_ACCESS_SECRET,
 
+  digilocker: {
+    clientId: process.env.DIGILOCKER_CLIENT_ID || "",
+    clientSecret: process.env.DIGILOCKER_CLIENT_SECRET || "",
+    redirectUri: process.env.DIGILOCKER_REDIRECT_URI || "",
+    authorizationUrl: process.env.DIGILOCKER_AUTHORIZATION_URL || "",
+    tokenUrl: process.env.DIGILOCKER_TOKEN_URL || "",
+    userInfoUrl: process.env.DIGILOCKER_USERINFO_URL || "",
+    documentsUrl: process.env.DIGILOCKER_DOCUMENTS_URL || "",
+    scopes: (process.env.DIGILOCKER_SCOPES || "").trim(),
+    tokenAuthMethod: process.env.DIGILOCKER_TOKEN_AUTH_METHOD || "client_secret_post",
+    stateTtlSeconds: Number(process.env.DIGILOCKER_STATE_TTL_SECONDS) || 600,
+    frontendSuccessPath: process.env.DIGILOCKER_SUCCESS_PATH || "/employee/settings/digilocker?status=success",
+    frontendFailurePath: process.env.DIGILOCKER_FAILURE_PATH || "/employee/settings/digilocker?status=failed",
+  },
+
   // All outgoing transactional email is driven entirely by these env vars, so the
   // provider (Gmail today, Amazon SES later) can be swapped without code changes.
   email: {
