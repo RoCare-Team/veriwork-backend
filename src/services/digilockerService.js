@@ -4,6 +4,8 @@ import { ApiError } from '../utils/ApiError.js';
 import { encryptSecret, decryptSecret } from '../utils/crypto.js';
 import { DigiLockerConnection } from '../models/DigiLockerConnection.js';
 import { DigiLockerOAuthState } from '../models/DigiLockerOAuthState.js';
+import { EmployeeProfile } from '../models/EmployeeProfile.js';
+import { refreshCachedScore } from './employeeProfileService.js';
 
 const PROVIDER = 'digilocker';
 
@@ -68,6 +70,34 @@ async function exchangeCode(code, codeVerifier) {
   return payload;
 }
 
+// The v2 token response (openid scope) carries the DigiLocker identity both as
+// top-level fields and inside id_token. id_token came straight from the token
+// endpoint over TLS, so reading its claims without a signature check is fine
+// (OIDC Core 3.1.3.7).
+function decodeIdToken(idToken) {
+  const part = typeof idToken === 'string' ? idToken.split('.')[1] : null;
+  if (!part) return {};
+  try {
+    return JSON.parse(Buffer.from(part, 'base64url').toString('utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function identityFromToken(token) {
+  const claims = decodeIdToken(token.id_token);
+  const pick = (...values) => values.find((v) => typeof v === 'string' && v.trim())?.trim() || '';
+  return {
+    providerUserId: pick(token.digilockerid, claims.digilockerid, claims.sub) || null,
+    identity: {
+      name: pick(token.name, claims.name, claims.given_name),
+      dob: pick(token.dob, claims.dob, claims.birthdate),
+      gender: pick(token.gender, claims.gender),
+      eaadhaarLinked: String(token.eaadhaar ?? claims.eaadhaar ?? '').toUpperCase() === 'Y',
+    },
+  };
+}
+
 async function fetchProviderUserId(accessToken) {
   if (!env.digilocker.userInfoUrl) return null;
   const response = await fetch(env.digilocker.userInfoUrl, {
@@ -100,6 +130,7 @@ export async function createAuthorizationUrl(userId) {
     code_challenge: pkce.challenge,
     code_challenge_method: 'S256',
   });
+  if (env.digilocker.dlFlow) params.set('dl_flow', env.digilocker.dlFlow);
   return { authorizationUrl: `${env.digilocker.authorizationUrl}?${params}` };
 }
 
@@ -121,12 +152,14 @@ export async function handleCallback({ code, state, error }) {
     const codeVerifier = decryptSecret(stateRecord.codeVerifierEncrypted);
     if (!codeVerifier) throw ApiError.badRequest('DigiLocker session is invalid; please try again');
     const token = await exchangeCode(code, codeVerifier);
-    const providerUserId = await fetchProviderUserId(token.access_token);
+    const { providerUserId: tokenUserId, identity } = identityFromToken(token);
+    const providerUserId = tokenUserId || (await fetchProviderUserId(token.access_token));
     await DigiLockerConnection.findOneAndUpdate(
       { userId: stateRecord.userId, provider: PROVIDER },
       {
         $set: {
           providerUserId,
+          identity,
           accessTokenEncrypted: encryptSecret(token.access_token),
           refreshTokenEncrypted: encryptSecret(token.refresh_token || ''),
           tokenExpiresAt: token.expires_in ? new Date(Date.now() + Number(token.expires_in) * 1000) : null,
@@ -138,11 +171,18 @@ export async function handleCallback({ code, state, error }) {
       },
       { upsert: true, new: true },
     );
+    await setDigilockerUsed(stateRecord.userId, true);
     return { redirect: safeRedirect(env.digilocker.frontendSuccessPath) };
   } catch (err) {
     await DigiLockerConnection.updateOne({ userId: stateRecord.userId, provider: PROVIDER }, { $set: { status: 'error' } });
     return { redirect: safeRedirect(env.digilocker.frontendFailurePath), message: err.isOperational ? err.message : 'DigiLocker authentication failed' };
   }
+}
+
+// Drives the "DigiLocker connected" score item and the flag shown to companies/admins.
+async function setDigilockerUsed(userId, used) {
+  const result = await EmployeeProfile.updateOne({ userId }, { $set: { digilockerUsed: used } });
+  if (result.modifiedCount) await refreshCachedScore(userId);
 }
 
 function publicConnection(connection) {
@@ -151,6 +191,7 @@ function publicConnection(connection) {
     connected: true,
     provider: PROVIDER,
     providerUserId: connection.providerUserId,
+    identity: connection.identity,
     scopes: connection.scopes,
     connectedAt: connection.connectedAt,
     updatedAt: connection.updatedAt,
@@ -201,5 +242,6 @@ export async function getPermittedDocuments(userId) {
 export async function disconnect(userId) {
   await DigiLockerConnection.deleteOne({ userId, provider: PROVIDER });
   await DigiLockerOAuthState.deleteMany({ userId });
+  await setDigilockerUsed(userId, false);
   return { connected: false };
 }
