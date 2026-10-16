@@ -6,6 +6,7 @@ import { DigiLockerConnection } from '../models/DigiLockerConnection.js';
 import { DigiLockerOAuthState } from '../models/DigiLockerOAuthState.js';
 import { EmployeeProfile } from '../models/EmployeeProfile.js';
 import { refreshCachedScore } from './employeeProfileService.js';
+import { verifyAadhaarViaDigiLocker } from './digilockerAadhaarService.js';
 
 const PROVIDER = 'digilocker';
 
@@ -25,6 +26,16 @@ function requireOAuthConfig({ data = false } = {}) {
 
 function safeRedirect(path) {
   return `${env.frontendUrl}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
+const AADHAAR_PAGE = '/employee/verification/aadhaar';
+
+// The callback returns the user to the page that started the flow.
+function resultRedirect(purpose, status) {
+  if (purpose === 'settings') {
+    return safeRedirect(status === 'success' ? env.digilocker.frontendSuccessPath : env.digilocker.frontendFailurePath);
+  }
+  return safeRedirect(`${AADHAAR_PAGE}?status=${status}`);
 }
 
 function providerErrorMessage(error) {
@@ -108,7 +119,7 @@ async function fetchProviderUserId(accessToken) {
   return payload.sub || payload.user_id || payload.userId || payload.id || null;
 }
 
-export async function createAuthorizationUrl(userId) {
+export async function createAuthorizationUrl(userId, { purpose = 'aadhaar' } = {}) {
   requireOAuthConfig();
   await DigiLockerOAuthState.deleteMany({ userId, usedAt: null });
   const rawState = crypto.randomBytes(32).toString('base64url');
@@ -118,6 +129,7 @@ export async function createAuthorizationUrl(userId) {
     userId,
     scopes: env.digilocker.scopes,
     codeVerifierEncrypted: encryptSecret(pkce.verifier),
+    purpose: purpose === 'settings' ? 'settings' : 'aadhaar',
     expiresAt: new Date(Date.now() + env.digilocker.stateTtlSeconds * 1000),
   });
 
@@ -135,25 +147,32 @@ export async function createAuthorizationUrl(userId) {
 }
 
 export async function handleCallback({ code, state, error }) {
-  if (error) return { redirect: safeRedirect(env.digilocker.frontendFailurePath), message: providerErrorMessage(error) };
-  if (!code || !state || !/^[A-Za-z0-9_-]{32,}$/.test(state)) {
-    return { redirect: safeRedirect(env.digilocker.frontendFailurePath), message: 'Invalid DigiLocker callback' };
+  const validState = typeof state === 'string' && /^[A-Za-z0-9_-]{32,}$/.test(state);
+  // Consume the state even on a provider error so we know which page to return to.
+  const stateRecord = validState
+    ? await DigiLockerOAuthState.findOneAndUpdate(
+        { stateHash: hashState(state), usedAt: null, expiresAt: { $gt: new Date() } },
+        { $set: { usedAt: new Date() } },
+        { new: true },
+      )
+    : null;
+  const purpose = stateRecord?.purpose || 'aadhaar';
+
+  if (error) return { redirect: resultRedirect(purpose, 'failed'), message: providerErrorMessage(error) };
+  if (!code || !validState) return { redirect: resultRedirect(purpose, 'failed'), message: 'Invalid DigiLocker callback' };
+  if (!stateRecord) {
+    return { redirect: resultRedirect(purpose, 'failed'), message: 'DigiLocker session expired. Please start again from PagerLook.' };
   }
 
-  const stateRecord = await DigiLockerOAuthState.findOneAndUpdate(
-    { stateHash: hashState(state), usedAt: null, expiresAt: { $gt: new Date() } },
-    { $set: { usedAt: new Date() } },
-    { new: true },
-  );
-  if (!stateRecord) return { redirect: safeRedirect(env.digilocker.frontendFailurePath), message: 'Expired DigiLocker authorization' };
-
+  let token;
+  let providerUserId;
   try {
     requireOAuthConfig();
     const codeVerifier = decryptSecret(stateRecord.codeVerifierEncrypted);
     if (!codeVerifier) throw ApiError.badRequest('DigiLocker session is invalid; please try again');
-    const token = await exchangeCode(code, codeVerifier);
+    token = await exchangeCode(code, codeVerifier);
     const { providerUserId: tokenUserId, identity } = identityFromToken(token);
-    const providerUserId = tokenUserId || (await fetchProviderUserId(token.access_token));
+    providerUserId = tokenUserId || (await fetchProviderUserId(token.access_token));
     await DigiLockerConnection.findOneAndUpdate(
       { userId: stateRecord.userId, provider: PROVIDER },
       {
@@ -172,10 +191,25 @@ export async function handleCallback({ code, state, error }) {
       { upsert: true, new: true },
     );
     await setDigilockerUsed(stateRecord.userId, true);
-    return { redirect: safeRedirect(env.digilocker.frontendSuccessPath) };
   } catch (err) {
     await DigiLockerConnection.updateOne({ userId: stateRecord.userId, provider: PROVIDER }, { $set: { status: 'error' } });
-    return { redirect: safeRedirect(env.digilocker.frontendFailurePath), message: err.isOperational ? err.message : 'DigiLocker authentication failed' };
+    return { redirect: resultRedirect(purpose, 'failed'), message: err.isOperational ? err.message : 'DigiLocker authentication failed' };
+  }
+
+  if (purpose === 'settings') return { redirect: resultRedirect(purpose, 'success') };
+
+  // Aadhaar KYC: pull e-Aadhaar and match it against the profile right away.
+  try {
+    const result = await verifyAadhaarViaDigiLocker(stateRecord.userId, {
+      accessToken: token.access_token,
+      digilockerId: providerUserId,
+    });
+    return result.verified
+      ? { redirect: resultRedirect(purpose, 'success') }
+      : { redirect: resultRedirect(purpose, 'mismatch'), message: result.message };
+  } catch (err) {
+    if (!err.isOperational) console.error('[digilocker] aadhaar verification failed', err);
+    return { redirect: resultRedirect(purpose, 'failed'), message: err.isOperational ? err.message : 'Aadhaar verification failed' };
   }
 }
 

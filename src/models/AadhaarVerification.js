@@ -49,10 +49,16 @@ const aadhaarVerificationSchema = new mongoose.Schema(
       unique: true,
       index: true,
     },
+    // 'digilocker': details fetched from the UIDAI e-Aadhaar via DigiLocker and
+    // matched against the profile automatically. 'manual': legacy card upload
+    // reviewed by an admin.
+    method: { type: String, enum: ['manual', 'digilocker'], default: 'manual' },
     // AES-256-GCM (utils/crypto.js). Never stored or logged in plain text.
-    aadhaarNumberEnc: { type: String, required: true },
-    // sha256 of the digits — uniqueness check only, not reversible.
-    aadhaarNumberHash: { type: String, required: true, index: true },
+    // Empty for DigiLocker records — the e-Aadhaar only carries a masked UID.
+    aadhaarNumberEnc: { type: String, default: '' },
+    // sha256 — uniqueness check only, not reversible. For DigiLocker records it
+    // hashes the masked UID + DOB + name, since the full number is never shared.
+    aadhaarNumberHash: { type: String, default: '', index: true },
     aadhaarLast4: { type: String, default: '' },
     nameOnAadhaar: { type: String, default: '' },
     dobOnAadhaar: { type: String, default: '' },
@@ -82,6 +88,21 @@ const aadhaarVerificationSchema = new mongoose.Schema(
     reviewNotes: { type: String, default: '' },
     rejectionReason: { type: String, default: '' },
     faceMatch: { type: faceMatchSchema, default: () => ({}) },
+    // DigiLocker auto-verification result. frontImage holds the e-Aadhaar photo
+    // for these records so the face match keeps using one reference field.
+    digilocker: {
+      digilockerId: { type: String, default: '', index: true },
+      fetchedAt: { type: Date, default: null },
+      checks: [
+        {
+          _id: false,
+          field: { type: String, required: true },
+          matched: { type: Boolean, default: false },
+          expected: { type: String, default: '' },
+          actual: { type: String, default: '' },
+        },
+      ],
+    },
   },
   { timestamps: true },
 );

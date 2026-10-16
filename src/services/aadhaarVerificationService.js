@@ -11,6 +11,16 @@ import {
   normalizeAadhaarNumber,
 } from '../utils/aadhaar.js';
 import { refreshCachedScore } from './employeeProfileService.js';
+import { env } from '../config/env.js';
+
+function formatChecks(record) {
+  return (record.digilocker?.checks || []).map((c) => ({
+    field: c.field,
+    matched: c.matched,
+    expected: c.expected,
+    actual: c.actual,
+  }));
+}
 
 function toStoredImage(stored) {
   if (!stored) return null;
@@ -36,8 +46,11 @@ export function formatSubmissionForEmployee(record) {
 
   return {
     submitted: true,
+    method: record.method || 'manual',
     status: record.status,
     canSubmit: record.status === 'rejected',
+    genderOnAadhaar: record.genderOnAadhaar || '',
+    checks: formatChecks(record),
     aadhaarMasked: `XXXX XXXX ${record.aadhaarLast4}`,
     aadhaarLast4: record.aadhaarLast4,
     nameOnAadhaar: record.nameOnAadhaar,
@@ -66,6 +79,8 @@ function formatSubmissionForAdmin(record, { profile, user, reviewer } = {}) {
   return {
     id: record._id,
     userId: record.userId,
+    method: record.method || 'manual',
+    checks: formatChecks(record),
     status: record.status,
     aadhaarNumber: formatAadhaarNumber(digits),
     aadhaarMasked: `XXXX XXXX ${record.aadhaarLast4}`,
@@ -123,6 +138,11 @@ export async function getSubmission(userId) {
 }
 
 export async function submitManualAadhaar(userId, payload, files) {
+  // Aadhaar is verified through DigiLocker whenever it is configured; the card
+  // upload is kept only as a fallback for environments without it.
+  if (env.digilocker.clientId && env.digilocker.clientSecret) {
+    throw ApiError.badRequest('Manual Aadhaar upload is disabled. Please verify with DigiLocker.');
+  }
   const profile = await EmployeeProfile.findOne({ userId });
   if (!profile) throw ApiError.notFound('Employee profile not found');
   if (!profile.profileSetupComplete) {

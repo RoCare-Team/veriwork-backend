@@ -7,6 +7,8 @@ const digiLockerOAuthStateSchema = new mongoose.Schema(
     scopes: { type: String, required: true },
     // PKCE code_verifier, encrypted at rest; sent back on the token exchange.
     codeVerifierEncrypted: { type: String, required: true },
+    // Where the flow started; decides the page the callback returns to.
+    purpose: { type: String, enum: ['aadhaar', 'settings'], default: 'aadhaar' },
     expiresAt: { type: Date, required: true, index: true },
     usedAt: { type: Date, default: null },
   },

@@ -13,10 +13,10 @@ import { formatSubmissionForEmployee } from './aadhaarVerificationService.js';
 import { REFERENCE_IMAGE_ERROR, runFaceVerification } from './faceMatchService.js';
 
 const AADHAAR_STEP_DESCRIPTIONS = {
-  not_submitted: 'Upload your Aadhaar front and back for verification',
+  not_submitted: 'Verify your Aadhaar instantly with DigiLocker',
   pending: 'Submitted — waiting for admin approval',
-  approved: 'Verified by the PagerLook team',
-  rejected: 'Rejected — fix the issue and submit again',
+  approved: 'Aadhaar verified',
+  rejected: 'Details did not match Aadhaar — fix your profile and verify again',
 };
 
 export async function getVerificationStatus(userId) {

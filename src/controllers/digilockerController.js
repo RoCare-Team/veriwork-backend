@@ -1,7 +1,7 @@
 import * as digilockerService from '../services/digilockerService.js';
 
 export async function connect(req, res) {
-  const data = await digilockerService.createAuthorizationUrl(req.user._id);
+  const data = await digilockerService.createAuthorizationUrl(req.user._id, { purpose: req.body?.purpose });
   res.json({ success: true, data });
 }
 

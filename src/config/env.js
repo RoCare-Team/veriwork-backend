@@ -183,6 +183,10 @@ export const env = Object.freeze({
     tokenUrl: process.env.DIGILOCKER_TOKEN_URL || "",
     userInfoUrl: process.env.DIGILOCKER_USERINFO_URL || "",
     documentsUrl: process.env.DIGILOCKER_DOCUMENTS_URL || "",
+    // UIDAI-signed e-Aadhaar XML for the consenting user.
+    eaadhaarUrl:
+      process.env.DIGILOCKER_EAADHAAR_URL ||
+      "https://digilocker.meripehchaan.gov.in/public/oauth2/3/xml/eaadhaar",
     scopes: (process.env.DIGILOCKER_SCOPES || "").trim(),
     // DigiLocker v2 authorize flow: signin | signup | aadhaar.
     dlFlow: (process.env.DIGILOCKER_DL_FLOW || "signin").trim(),
