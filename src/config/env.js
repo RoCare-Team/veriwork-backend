@@ -187,9 +187,15 @@ export const env = Object.freeze({
     eaadhaarUrl:
       process.env.DIGILOCKER_EAADHAAR_URL ||
       "https://digilocker.meripehchaan.gov.in/public/oauth2/3/xml/eaadhaar",
+    // "Get Certificate Data in XML Format from URI" — <base>/<uri>.
+    xmlByUriUrl: (
+      process.env.DIGILOCKER_XML_BY_URI_URL ||
+      "https://digilocker.meripehchaan.gov.in/public/oauth2/1/xml"
+    ).replace(/\/$/, ""),
     scopes: (process.env.DIGILOCKER_SCOPES || "").trim(),
     // DigiLocker v2 authorize flow: signin | signup | aadhaar.
-    dlFlow: (process.env.DIGILOCKER_DL_FLOW || "signin").trim(),
+    // Empty = omit dl_flow (API Setu leaves it out when openid is not requested).
+    dlFlow: (process.env.DIGILOCKER_DL_FLOW ?? "signin").trim(),
     tokenAuthMethod: process.env.DIGILOCKER_TOKEN_AUTH_METHOD || "client_secret_post",
     stateTtlSeconds: Number(process.env.DIGILOCKER_STATE_TTL_SECONDS) || 600,
     frontendSuccessPath: process.env.DIGILOCKER_SUCCESS_PATH || "/employee/settings/digilocker?status=success",

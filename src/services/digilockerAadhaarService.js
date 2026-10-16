@@ -116,7 +116,10 @@ export function namesMatch(profileName, aadhaarName) {
 /** e-Aadhaar DOB is DD-MM-YYYY (or DD/MM/YYYY, or just YYYY); profile is YYYY-MM-DD. */
 export function normalizeAadhaarDob(value) {
   const raw = String(value || '').trim();
-  let m = raw.match(/^(\d{2})[-/](\d{2})[-/](\d{4})$/);
+  // DigiLocker's token response sends DOB as DDMMYYYY.
+  let m = raw.match(/^(\d{2})(\d{2})(\d{4})$/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  m = raw.match(/^(\d{2})[-/](\d{2})[-/](\d{4})$/);
   if (m) return `${m[3]}-${m[2]}-${m[1]}`;
   m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (m) return raw;
@@ -177,22 +180,90 @@ function identityHash(aadhaar) {
   return crypto.createHash('sha256').update(`aadhaar-dl:${key}`).digest('hex');
 }
 
-async function fetchEAadhaar(accessToken) {
-  const response = await fetch(env.digilocker.eaadhaarUrl, {
+async function getXml(url, accessToken) {
+  const response = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/xml' },
   });
   const body = await response.text().catch(() => '');
   if (!response.ok) {
-    console.error('[digilocker] e-Aadhaar fetch failed', response.status, body.slice(0, 200));
-    throw ApiError.badRequest(
-      response.status === 404
-        ? 'No Aadhaar is linked to this DigiLocker account. Link Aadhaar in DigiLocker and try again.'
-        : 'Could not fetch your Aadhaar from DigiLocker. Please try again.',
-    );
+    const err = new Error(`HTTP ${response.status}`);
+    err.status = response.status;
+    err.body = body.slice(0, 300);
+    throw err;
   }
   const parsed = parseEAadhaarXml(body);
-  if (!parsed?.name) throw ApiError.badRequest('DigiLocker returned an unreadable Aadhaar record');
+  if (!parsed?.name) {
+    const err = new Error('unreadable Aadhaar XML');
+    err.body = body.slice(0, 300);
+    throw err;
+  }
   return parsed;
+}
+
+// The Aadhaar card as an issued document (doctype ADHAR) — needs the
+// issued_documents scope; its XML is the same UIDAI e-Aadhaar layout.
+async function fetchAadhaarFromIssuedDocuments(accessToken) {
+  if (!env.digilocker.documentsUrl) throw new Error('documents URL not configured');
+  const response = await fetch(env.digilocker.documentsUrl, {
+    headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    const err = new Error(`HTTP ${response.status}`);
+    err.status = response.status;
+    err.body = (await response.text().catch(() => '')).slice(0, 300);
+    throw err;
+  }
+  const payload = await response.json().catch(() => ({}));
+  const doc = (payload.items || []).find((item) => String(item.doctype || '').toUpperCase() === 'ADHAR');
+  if (!doc?.uri) throw new Error('no Aadhaar in issued documents');
+  return getXml(`${env.digilocker.xmlByUriUrl}/${encodeURIComponent(doc.uri)}`, accessToken);
+}
+
+/**
+ * Standard fallback chain for the Aadhaar record:
+ *   1. e-Aadhaar XML           (UIDAI data incl. photo)
+ *   2. Aadhaar issued document (same XML, via issued_documents)
+ *   3. DigiLocker KYC identity from the token — only when the account is
+ *      Aadhaar-linked (eaadhaar=Y), since DigiLocker then sources the
+ *      name/DOB/gender from UIDAI. No photo in this case.
+ */
+async function loadAadhaar(accessToken, tokenIdentity) {
+  const failures = [];
+
+  try {
+    return { source: 'eaadhaar', ...(await getXml(env.digilocker.eaadhaarUrl, accessToken)) };
+  } catch (err) {
+    failures.push(['eaadhaar', err]);
+  }
+
+  try {
+    return { source: 'issued_document', ...(await fetchAadhaarFromIssuedDocuments(accessToken)) };
+  } catch (err) {
+    failures.push(['issued_document', err]);
+  }
+
+  for (const [source, err] of failures) {
+    console.error(`[digilocker] aadhaar source "${source}" failed:`, err.message, err.body || '');
+  }
+
+  if (tokenIdentity?.eaadhaarLinked && tokenIdentity.name && tokenIdentity.dob) {
+    return {
+      source: 'digilocker_profile',
+      maskedUid: '',
+      name: tokenIdentity.name,
+      dob: tokenIdentity.dob,
+      gender: tokenIdentity.gender,
+      address: '',
+      photoBase64: '',
+    };
+  }
+
+  if (tokenIdentity?.eaadhaarFlag === 'N') {
+    throw ApiError.badRequest('No Aadhaar is linked to this DigiLocker account. Link Aadhaar in DigiLocker and try again.');
+  }
+  // Short per-source reasons (no tokens/PII) so a failure is diagnosable from the page.
+  const reasons = failures.map(([source, err]) => `${source}: ${err.message}`).join('; ');
+  throw ApiError.badRequest(`Could not fetch your Aadhaar from DigiLocker (${reasons}). Please try again.`);
 }
 
 async function storeAadhaarPhoto(photoBase64) {
@@ -219,7 +290,7 @@ async function storeAadhaarPhoto(photoBase64) {
  * Pulls e-Aadhaar for a freshly connected DigiLocker account and verifies it
  * against the employee's profile. Returns { verified, message }.
  */
-export async function verifyAadhaarViaDigiLocker(userId, { accessToken, digilockerId }) {
+export async function verifyAadhaarViaDigiLocker(userId, { accessToken, digilockerId, tokenIdentity }) {
   const profile = await EmployeeProfile.findOne({ userId });
   if (!profile) throw ApiError.notFound('Employee profile not found');
   if (!profile.profileSetupComplete) {
@@ -231,7 +302,7 @@ export async function verifyAadhaarViaDigiLocker(userId, { accessToken, digilock
     return { verified: true, message: 'Aadhaar is already verified' };
   }
 
-  const raw = await fetchEAadhaar(accessToken);
+  const raw = await loadAadhaar(accessToken, tokenIdentity);
   const aadhaar = {
     ...raw,
     dob: normalizeAadhaarDob(raw.dob),
@@ -269,7 +340,7 @@ export async function verifyAadhaarViaDigiLocker(userId, { accessToken, digilock
     reviewedBy: null,
     reviewNotes: 'Auto-verified against UIDAI e-Aadhaar via DigiLocker',
     rejectionReason: mismatchReason(checks),
-    digilocker: { digilockerId: digilockerId || '', fetchedAt: now, checks },
+    digilocker: { digilockerId: digilockerId || '', source: raw.source, fetchedAt: now, checks },
     // New reference photo — any earlier face match no longer applies.
     faceMatch: {},
   };

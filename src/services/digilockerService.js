@@ -105,6 +105,8 @@ function identityFromToken(token) {
       dob: pick(token.dob, claims.dob, claims.birthdate),
       gender: pick(token.gender, claims.gender),
       eaadhaarLinked: String(token.eaadhaar ?? claims.eaadhaar ?? '').toUpperCase() === 'Y',
+      // Raw flag (Y / N / '' when DigiLocker didn't send it) — in memory only.
+      eaadhaarFlag: String(token.eaadhaar ?? claims.eaadhaar ?? '').toUpperCase(),
     },
   };
 }
@@ -166,12 +168,14 @@ export async function handleCallback({ code, state, error }) {
 
   let token;
   let providerUserId;
+  let tokenIdentity;
   try {
     requireOAuthConfig();
     const codeVerifier = decryptSecret(stateRecord.codeVerifierEncrypted);
     if (!codeVerifier) throw ApiError.badRequest('DigiLocker session is invalid; please try again');
     token = await exchangeCode(code, codeVerifier);
     const { providerUserId: tokenUserId, identity } = identityFromToken(token);
+    tokenIdentity = identity;
     providerUserId = tokenUserId || (await fetchProviderUserId(token.access_token));
     await DigiLockerConnection.findOneAndUpdate(
       { userId: stateRecord.userId, provider: PROVIDER },
@@ -203,6 +207,7 @@ export async function handleCallback({ code, state, error }) {
     const result = await verifyAadhaarViaDigiLocker(stateRecord.userId, {
       accessToken: token.access_token,
       digilockerId: providerUserId,
+      tokenIdentity,
     });
     return result.verified
       ? { redirect: resultRedirect(purpose, 'success') }

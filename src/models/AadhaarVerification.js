@@ -92,6 +92,8 @@ const aadhaarVerificationSchema = new mongoose.Schema(
     // for these records so the face match keeps using one reference field.
     digilocker: {
       digilockerId: { type: String, default: '', index: true },
+      // eaadhaar | issued_document | digilocker_profile — where the data came from.
+      source: { type: String, default: '' },
       fetchedAt: { type: Date, default: null },
       checks: [
         {
