@@ -95,30 +95,42 @@ function decodeIdToken(idToken) {
   }
 }
 
-function identityFromToken(token) {
+// Identity from the token response, its id_token (openid) and the "Get User
+// Details" API (userdetails scope) — whichever carries each field.
+function identityFromToken(token, details = {}) {
   const claims = decodeIdToken(token.id_token);
   const pick = (...values) => values.find((v) => typeof v === 'string' && v.trim())?.trim() || '';
+  const flag = pick(token.eaadhaar, claims.eaadhaar, details.eaadhaar).toUpperCase();
   return {
-    providerUserId: pick(token.digilockerid, claims.digilockerid, claims.sub) || null,
+    providerUserId: pick(token.digilockerid, claims.digilockerid, claims.sub, details.digilockerid, details.sub) || null,
     identity: {
-      name: pick(token.name, claims.name, claims.given_name),
-      dob: pick(token.dob, claims.dob, claims.birthdate),
-      gender: pick(token.gender, claims.gender),
-      eaadhaarLinked: String(token.eaadhaar ?? claims.eaadhaar ?? '').toUpperCase() === 'Y',
+      name: pick(token.name, claims.name, claims.given_name, details.name),
+      dob: pick(token.dob, claims.dob, claims.birthdate, details.dob),
+      gender: pick(token.gender, claims.gender, details.gender),
+      eaadhaarLinked: flag === 'Y',
       // Raw flag (Y / N / '' when DigiLocker didn't send it) — in memory only.
-      eaadhaarFlag: String(token.eaadhaar ?? claims.eaadhaar ?? '').toUpperCase(),
+      eaadhaarFlag: flag,
     },
   };
 }
 
-async function fetchProviderUserId(accessToken) {
-  if (!env.digilocker.userInfoUrl) return null;
-  const response = await fetch(env.digilocker.userInfoUrl, {
-    headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
-  });
-  if (!response.ok) return null;
-  const payload = await response.json().catch(() => ({}));
-  return payload.sub || payload.user_id || payload.userId || payload.id || null;
+// GET /oauth2/1/user → { digilockerid, name, dob, gender, eaadhaar, reference_key }.
+async function fetchUserDetails(accessToken) {
+  if (!env.digilocker.userInfoUrl) return {};
+  try {
+    const response = await fetch(env.digilocker.userInfoUrl, {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      console.error('[digilocker] user details failed', response.status, payload.error, payload.error_description);
+      return {};
+    }
+    return payload;
+  } catch (err) {
+    console.error('[digilocker] user details failed', err.message);
+    return {};
+  }
 }
 
 export async function createAuthorizationUrl(userId, { purpose = 'aadhaar' } = {}) {
@@ -174,9 +186,10 @@ export async function handleCallback({ code, state, error }) {
     const codeVerifier = decryptSecret(stateRecord.codeVerifierEncrypted);
     if (!codeVerifier) throw ApiError.badRequest('DigiLocker session is invalid; please try again');
     token = await exchangeCode(code, codeVerifier);
-    const { providerUserId: tokenUserId, identity } = identityFromToken(token);
+    const userDetails = await fetchUserDetails(token.access_token);
+    const { providerUserId: tokenUserId, identity } = identityFromToken(token, userDetails);
     tokenIdentity = identity;
-    providerUserId = tokenUserId || (await fetchProviderUserId(token.access_token));
+    providerUserId = tokenUserId;
     await DigiLockerConnection.findOneAndUpdate(
       { userId: stateRecord.userId, provider: PROVIDER },
       {

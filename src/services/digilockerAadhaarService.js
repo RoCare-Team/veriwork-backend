@@ -180,17 +180,26 @@ function identityHash(aadhaar) {
   return crypto.createHash('sha256').update(`aadhaar-dl:${key}`).digest('hex');
 }
 
+// "HTTP 403 insufficient_scope" — DigiLocker's own error code, when it sends one.
+function httpError(status, body) {
+  let code = '';
+  try {
+    code = JSON.parse(body).error || '';
+  } catch {
+    code = (body.match(/<error>([^<]{1,60})<\/error>/i) || [])[1] || '';
+  }
+  const err = new Error(`HTTP ${status}${code ? ` ${code}` : ''}`);
+  err.status = status;
+  err.body = body.slice(0, 300);
+  return err;
+}
+
 async function getXml(url, accessToken) {
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/xml' },
   });
   const body = await response.text().catch(() => '');
-  if (!response.ok) {
-    const err = new Error(`HTTP ${response.status}`);
-    err.status = response.status;
-    err.body = body.slice(0, 300);
-    throw err;
-  }
+  if (!response.ok) throw httpError(response.status, body);
   const parsed = parseEAadhaarXml(body);
   if (!parsed?.name) {
     const err = new Error('unreadable Aadhaar XML');
@@ -207,15 +216,15 @@ async function fetchAadhaarFromIssuedDocuments(accessToken) {
   const response = await fetch(env.digilocker.documentsUrl, {
     headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
   });
-  if (!response.ok) {
-    const err = new Error(`HTTP ${response.status}`);
-    err.status = response.status;
-    err.body = (await response.text().catch(() => '')).slice(0, 300);
-    throw err;
-  }
+  if (!response.ok) throw httpError(response.status, await response.text().catch(() => ''));
   const payload = await response.json().catch(() => ({}));
-  const doc = (payload.items || []).find((item) => String(item.doctype || '').toUpperCase() === 'ADHAR');
-  if (!doc?.uri) throw new Error('no Aadhaar in issued documents');
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  const doc = items.find((item) => String(item.doctype || '').toUpperCase() === 'ADHAR');
+  if (!doc?.uri) {
+    // Doctypes only (e.g. PANCR, DRVLC) — no document contents or numbers.
+    const types = [...new Set(items.map((item) => item.doctype).filter(Boolean))].join(',');
+    throw new Error(`no Aadhaar in issued documents (${items.length} found${types ? `: ${types}` : ''})`);
+  }
   return getXml(`${env.digilocker.xmlByUriUrl}/${encodeURIComponent(doc.uri)}`, accessToken);
 }
 
@@ -261,6 +270,15 @@ async function loadAadhaar(accessToken, tokenIdentity) {
   if (tokenIdentity?.eaadhaarFlag === 'N') {
     throw ApiError.badRequest('No Aadhaar is linked to this DigiLocker account. Link Aadhaar in DigiLocker and try again.');
   }
+  // Why the profile fallback could not be used either.
+  failures.push([
+    'profile',
+    new Error(
+      !tokenIdentity?.eaadhaarFlag
+        ? 'Aadhaar-linked flag not returned'
+        : `missing ${['name', 'dob'].filter((k) => !tokenIdentity[k]).join('/') || 'details'}`,
+    ),
+  ]);
   // Short per-source reasons (no tokens/PII) so a failure is diagnosable from the page.
   const reasons = failures.map(([source, err]) => `${source}: ${err.message}`).join('; ');
   throw ApiError.badRequest(`Could not fetch your Aadhaar from DigiLocker (${reasons}). Please try again.`);
