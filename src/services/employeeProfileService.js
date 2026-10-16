@@ -17,6 +17,7 @@ import { ApiError } from '../utils/ApiError.js';
 import { storeUploadedFile } from '../utils/fileUpload.js';
 import { autoJoinAfterProfileSetup } from './invitationService.js';
 import { buildPublicProfileUrl } from '../utils/publicProfileUrl.js';
+import { rematchDigilockerAadhaar } from './digilockerAadhaarService.js';
 
 export async function getOrCreateEmployeeUser(phone) {
   const normalized = normalizePhone(phone);
@@ -250,6 +251,11 @@ export async function updateEmployeeProfile(userId, data, photoFile = null) {
   }
 
   profile.profileSetupComplete = isProfileFieldsComplete(profile);
+
+  // Aadhaar was verified against these fields — re-check them whenever they change.
+  if (['name', 'dateOfBirth', 'gender'].some((key) => data[key] !== undefined)) {
+    await rematchDigilockerAadhaar(profile);
+  }
 
   await profile.save();
   await refreshCachedScore(userId);

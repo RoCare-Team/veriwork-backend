@@ -65,6 +65,7 @@ router.get('/verification/status', asyncHandler(employeeController.getVerificati
 // Manual Aadhaar KYC: the employee uploads the card front + back and types the
 // number; a platform admin reviews it before aadhaarVerified is set.
 router.get('/verification/aadhaar', asyncHandler(employeeController.getAadhaarSubmission));
+router.post('/verification/aadhaar/use-aadhaar-details', asyncHandler(employeeController.useAadhaarDetails));
 router.post(
   '/verification/aadhaar',
   uploadPhoto.fields([

@@ -304,6 +304,56 @@ async function storeAadhaarPhoto(photoBase64) {
     : null;
 }
 
+function aadhaarFromRecord(record) {
+  return { name: record.nameOnAadhaar, dob: record.dobOnAadhaar, gender: record.genderOnAadhaar };
+}
+
+/**
+ * Re-runs the profile ↔ Aadhaar match against the Aadhaar data already fetched
+ * from DigiLocker — no new DigiLocker login. Called whenever the employee edits
+ * their name / DOB / gender, so the result always reflects the current profile.
+ * Mutates `profile.aadhaarVerified`; the caller saves the profile.
+ */
+export async function rematchDigilockerAadhaar(profile) {
+  const record = await AadhaarVerification.findOne({ userId: profile.userId, method: 'digilocker' });
+  if (!record?.nameOnAadhaar) return null;
+
+  const checks = buildChecks(profile, aadhaarFromRecord(record));
+  const verified = checks.every((c) => c.matched);
+  record.digilocker.checks = checks;
+  record.status = verified ? 'approved' : 'rejected';
+  record.rejectionReason = mismatchReason(checks);
+  record.reviewedAt = new Date();
+  await record.save();
+
+  profile.aadhaarVerified = verified;
+  if (verified) profile.digilockerUsed = true;
+  return { verified, record };
+}
+
+/**
+ * "Continue with Aadhaar details": Aadhaar is the source of truth, so copy its
+ * name / DOB / gender onto the profile, then re-match (which now passes).
+ */
+export async function applyAadhaarDetailsToProfile(userId) {
+  const [profile, record] = await Promise.all([
+    EmployeeProfile.findOne({ userId }),
+    AadhaarVerification.findOne({ userId, method: 'digilocker' }),
+  ]);
+  if (!profile) throw ApiError.notFound('Employee profile not found');
+  if (!record?.nameOnAadhaar) throw ApiError.badRequest('Verify with DigiLocker first');
+
+  profile.name = record.nameOnAadhaar;
+  // A year-only Aadhaar DOB can't fill a full date — the year check already passes.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(record.dobOnAadhaar)) profile.dateOfBirth = record.dobOnAadhaar;
+  if (record.genderOnAadhaar) profile.gender = record.genderOnAadhaar;
+
+  await rematchDigilockerAadhaar(profile);
+  await profile.save();
+  await refreshCachedScore(userId);
+  return profile;
+}
+
 /**
  * Pulls e-Aadhaar for a freshly connected DigiLocker account and verifies it
  * against the employee's profile. Returns { verified, message }.

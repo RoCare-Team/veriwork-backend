@@ -1,6 +1,7 @@
 import * as profileService from '../services/employeeProfileService.js';
 import * as verificationService from '../services/verificationService.js';
 import * as aadhaarVerificationService from '../services/aadhaarVerificationService.js';
+import { applyAadhaarDetailsToProfile } from '../services/digilockerAadhaarService.js';
 import * as jobService from '../services/jobService.js';
 import * as activityService from '../services/activityService.js';
 import * as vaultService from '../services/vaultService.js';
@@ -71,6 +72,16 @@ export async function getVerificationStatus(req, res) {
 export async function getAadhaarSubmission(req, res) {
   const data = await aadhaarVerificationService.getSubmission(req.user._id);
   res.json({ success: true, data });
+}
+
+// Mismatch → "Continue with Aadhaar details": copy Aadhaar values onto the profile.
+export async function useAadhaarDetails(req, res) {
+  const profile = await applyAadhaarDetailsToProfile(req.user._id);
+  const [submission, jobs] = await Promise.all([
+    aadhaarVerificationService.getSubmission(req.user._id),
+    profileService.getJobsForUser(req.user._id),
+  ]);
+  res.json({ success: true, data: { submission, profile: profileService.buildProfileResponse(profile, jobs) } });
 }
 
 export async function submitAadhaar(req, res) {
