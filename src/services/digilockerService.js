@@ -35,11 +35,19 @@ function providerErrorMessage(error) {
   return known[error] || 'DigiLocker authentication failed';
 }
 
-async function exchangeCode(code) {
+// PKCE (RFC 7636, S256) — DigiLocker rejects authorization requests without it.
+function createPkcePair() {
+  const verifier = crypto.randomBytes(48).toString('base64url');
+  const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+  return { verifier, challenge };
+}
+
+async function exchangeCode(code, codeVerifier) {
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
     code,
     redirect_uri: env.digilocker.redirectUri,
+    code_verifier: codeVerifier,
   });
   const headers = { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' };
   if (env.digilocker.tokenAuthMethod === 'client_secret_basic') {
@@ -53,6 +61,8 @@ async function exchangeCode(code) {
   const response = await fetch(env.digilocker.tokenUrl, { method: 'POST', headers, body });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload.access_token) {
+    // Log the provider's reason (never the code/verifier) so failures are diagnosable.
+    console.error('[digilocker] token exchange failed', response.status, payload.error, payload.error_description);
     throw ApiError.badRequest('DigiLocker authorization could not be completed');
   }
   return payload;
@@ -72,10 +82,12 @@ export async function createAuthorizationUrl(userId) {
   requireOAuthConfig();
   await DigiLockerOAuthState.deleteMany({ userId, usedAt: null });
   const rawState = crypto.randomBytes(32).toString('base64url');
+  const pkce = createPkcePair();
   await DigiLockerOAuthState.create({
     stateHash: hashState(rawState),
     userId,
     scopes: env.digilocker.scopes,
+    codeVerifierEncrypted: encryptSecret(pkce.verifier),
     expiresAt: new Date(Date.now() + env.digilocker.stateTtlSeconds * 1000),
   });
 
@@ -85,6 +97,8 @@ export async function createAuthorizationUrl(userId) {
     redirect_uri: env.digilocker.redirectUri,
     scope: env.digilocker.scopes,
     state: rawState,
+    code_challenge: pkce.challenge,
+    code_challenge_method: 'S256',
   });
   return { authorizationUrl: `${env.digilocker.authorizationUrl}?${params}` };
 }
@@ -104,7 +118,9 @@ export async function handleCallback({ code, state, error }) {
 
   try {
     requireOAuthConfig();
-    const token = await exchangeCode(code);
+    const codeVerifier = decryptSecret(stateRecord.codeVerifierEncrypted);
+    if (!codeVerifier) throw ApiError.badRequest('DigiLocker session is invalid; please try again');
+    const token = await exchangeCode(code, codeVerifier);
     const providerUserId = await fetchProviderUserId(token.access_token);
     await DigiLockerConnection.findOneAndUpdate(
       { userId: stateRecord.userId, provider: PROVIDER },
