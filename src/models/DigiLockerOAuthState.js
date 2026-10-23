@@ -9,6 +9,8 @@ const digiLockerOAuthStateSchema = new mongoose.Schema(
     codeVerifierEncrypted: { type: String, required: true },
     // Where the flow started; decides the page the callback returns to.
     purpose: { type: String, enum: ['aadhaar', 'settings'], default: 'aadhaar' },
+    // App that started the flow; 'mobile' returns through the app's deep link.
+    client: { type: String, enum: ['web', 'mobile'], default: 'web' },
     expiresAt: { type: Date, required: true, index: true },
     usedAt: { type: Date, default: null },
   },

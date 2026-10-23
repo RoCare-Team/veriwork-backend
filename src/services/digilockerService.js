@@ -24,18 +24,24 @@ function requireOAuthConfig({ data = false } = {}) {
   }
 }
 
-function safeRedirect(path) {
-  return `${env.frontendUrl}${path.startsWith('/') ? path : `/${path}`}`;
+// Flows started from the mobile app return through its deep link instead of the
+// web app, so the user lands back in the app rather than a signed-out browser tab.
+function safeRedirect(path, client) {
+  const base = client === 'mobile' ? env.digilocker.mobileRedirectBase : env.frontendUrl;
+  return `${base}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
 const AADHAAR_PAGE = '/employee/verification/aadhaar';
 
 // The callback returns the user to the page that started the flow.
-function resultRedirect(purpose, status) {
+function resultRedirect(purpose, status, client) {
   if (purpose === 'settings') {
-    return safeRedirect(status === 'success' ? env.digilocker.frontendSuccessPath : env.digilocker.frontendFailurePath);
+    return safeRedirect(
+      status === 'success' ? env.digilocker.frontendSuccessPath : env.digilocker.frontendFailurePath,
+      client,
+    );
   }
-  return safeRedirect(`${AADHAAR_PAGE}?status=${status}`);
+  return safeRedirect(`${AADHAAR_PAGE}?status=${status}`, client);
 }
 
 function providerErrorMessage(error) {
@@ -133,7 +139,7 @@ async function fetchUserDetails(accessToken) {
   }
 }
 
-export async function createAuthorizationUrl(userId, { purpose = 'aadhaar' } = {}) {
+export async function createAuthorizationUrl(userId, { purpose = 'aadhaar', client = 'web' } = {}) {
   requireOAuthConfig();
   await DigiLockerOAuthState.deleteMany({ userId, usedAt: null });
   const rawState = crypto.randomBytes(32).toString('base64url');
@@ -144,6 +150,7 @@ export async function createAuthorizationUrl(userId, { purpose = 'aadhaar' } = {
     scopes: env.digilocker.scopes,
     codeVerifierEncrypted: encryptSecret(pkce.verifier),
     purpose: purpose === 'settings' ? 'settings' : 'aadhaar',
+    client: client === 'mobile' ? 'mobile' : 'web',
     expiresAt: new Date(Date.now() + env.digilocker.stateTtlSeconds * 1000),
   });
 
@@ -171,11 +178,12 @@ export async function handleCallback({ code, state, error }) {
       )
     : null;
   const purpose = stateRecord?.purpose || 'aadhaar';
+  const client = stateRecord?.client || 'web';
 
-  if (error) return { redirect: resultRedirect(purpose, 'failed'), message: providerErrorMessage(error) };
-  if (!code || !validState) return { redirect: resultRedirect(purpose, 'failed'), message: 'Invalid DigiLocker callback' };
+  if (error) return { redirect: resultRedirect(purpose, 'failed', client), message: providerErrorMessage(error) };
+  if (!code || !validState) return { redirect: resultRedirect(purpose, 'failed', client), message: 'Invalid DigiLocker callback' };
   if (!stateRecord) {
-    return { redirect: resultRedirect(purpose, 'failed'), message: 'DigiLocker session expired. Please start again from PagerLook.' };
+    return { redirect: resultRedirect(purpose, 'failed', client), message: 'DigiLocker session expired. Please start again from PagerLook.' };
   }
 
   let token;
@@ -210,10 +218,10 @@ export async function handleCallback({ code, state, error }) {
     await setDigilockerUsed(stateRecord.userId, true);
   } catch (err) {
     await DigiLockerConnection.updateOne({ userId: stateRecord.userId, provider: PROVIDER }, { $set: { status: 'error' } });
-    return { redirect: resultRedirect(purpose, 'failed'), message: err.isOperational ? err.message : 'DigiLocker authentication failed' };
+    return { redirect: resultRedirect(purpose, 'failed', client), message: err.isOperational ? err.message : 'DigiLocker authentication failed' };
   }
 
-  if (purpose === 'settings') return { redirect: resultRedirect(purpose, 'success') };
+  if (purpose === 'settings') return { redirect: resultRedirect(purpose, 'success', client) };
 
   // Aadhaar KYC: pull e-Aadhaar and match it against the profile right away.
   try {
@@ -223,11 +231,11 @@ export async function handleCallback({ code, state, error }) {
       tokenIdentity,
     });
     return result.verified
-      ? { redirect: resultRedirect(purpose, 'success') }
-      : { redirect: resultRedirect(purpose, 'mismatch'), message: result.message };
+      ? { redirect: resultRedirect(purpose, 'success', client) }
+      : { redirect: resultRedirect(purpose, 'mismatch', client), message: result.message };
   } catch (err) {
     if (!err.isOperational) console.error('[digilocker] aadhaar verification failed', err);
-    return { redirect: resultRedirect(purpose, 'failed'), message: err.isOperational ? err.message : 'Aadhaar verification failed' };
+    return { redirect: resultRedirect(purpose, 'failed', client), message: err.isOperational ? err.message : 'Aadhaar verification failed' };
   }
 }
 

@@ -10,7 +10,7 @@ dotenv.config({ path: path.join(root, ".env.local"), override: false });
 
 const devDefaults = {
   MONGODB_URI: "mongodb://127.0.0.1:27017/veriwork",
-  JWT_ACCESS_SECRET: "dev-access-secret-change-in-production-32chars",
+  JWT_ACCESS_SECRET: "dev-access-secret-  -in-production-32chars",
   JWT_REFRESH_SECRET: "dev-refresh-secret-change-in-production-32chars",
 };
 
@@ -200,6 +200,8 @@ export const env = Object.freeze({
     stateTtlSeconds: Number(process.env.DIGILOCKER_STATE_TTL_SECONDS) || 600,
     frontendSuccessPath: process.env.DIGILOCKER_SUCCESS_PATH || "/employee/settings/digilocker?status=success",
     frontendFailurePath: process.env.DIGILOCKER_FAILURE_PATH || "/employee/settings/digilocker?status=failed",
+    // Deep-link origin of the mobile app; the callback appends the same paths as the web.
+    mobileRedirectBase: (process.env.DIGILOCKER_MOBILE_REDIRECT_BASE || "pagerlook://app").replace(/\/$/, ""),
   },
 
   // All outgoing transactional email is driven entirely by these env vars, so the
