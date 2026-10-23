@@ -80,13 +80,14 @@ export const env = Object.freeze({
 
     // Test numbers that always get a fixed OTP and never trigger a real SMS —
     // used for app-store/demo logins where a live SMS can't be received.
-    // Comma-separated in OTP_TEST_PHONES; stored normalized (+91XXXXXXXXXX).
-    testPhones: (process.env.OTP_TEST_PHONES || "7740847114")
-      .split(",")
+    // The employee demo number is hardcoded and always on; OTP_TEST_PHONES
+    // (comma-separated) can add more. Stored normalized (+91XXXXXXXXXX).
+    testPhones: [...new Set(["7740847114", ...(process.env.OTP_TEST_PHONES || "").split(",")])]
       .map((p) => p.replace(/\D/g, ""))
       .filter(Boolean)
       .map((d) => (d.length === 10 ? `+91${d}` : `+${d}`)),
-    testCode: process.env.OTP_TEST_CODE || "123456",
+    // Hardcoded demo OTP for every test number.
+    testCode: "1234",
   },
 
   // SMS gateway (savshka) for phone OTP. When SMS_API_KEY is unset, OTP stays in

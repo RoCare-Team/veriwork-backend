@@ -1,11 +1,12 @@
 import app from './app.js';
 import { connectDatabase } from './config/database.js';
-import { ensurePlatformAdmin } from './config/bootstrap.js';
+import { ensureDemoEmployer, ensurePlatformAdmin } from './config/bootstrap.js';
 import { env } from './config/env.js';
 
 async function start() {
   await connectDatabase();
   await ensurePlatformAdmin();
+  await ensureDemoEmployer();
   app.listen(env.port, () => {
     console.log(`VeriWork API listening on http://localhost:${env.port}`);
     console.log(`Swagger docs: http://localhost:${env.port}/api/docs`);
