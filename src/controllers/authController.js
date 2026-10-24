@@ -1,4 +1,5 @@
 import * as authService from '../services/authService.js';
+import * as accountDeletionService from '../services/accountDeletionService.js';
 
 export async function sendEmployeeOtp(req, res) {
   const result = await authService.employeeSendOtp(req.body.phone);
@@ -56,5 +57,25 @@ export async function refresh(req, res) {
 
 export async function logout(req, res) {
   const result = await authService.logout(req.body.refreshToken, req.user?._id);
+  res.json({ success: true, data: result });
+}
+
+export async function sendEmployeeDeletionOtp(req, res) {
+  const result = await accountDeletionService.sendEmployeeDeletionOtp(req.body.phone);
+  res.json({ success: true, data: result });
+}
+
+export async function confirmEmployeeDeletion(req, res) {
+  const result = await accountDeletionService.confirmEmployeeDeletion(req.body.phone, req.body.code);
+  res.json({ success: true, data: result });
+}
+
+export async function sendEmployerDeletionOtp(req, res) {
+  const result = await accountDeletionService.sendEmployerDeletionOtp(req.body.email);
+  res.json({ success: true, data: result });
+}
+
+export async function confirmEmployerDeletion(req, res) {
+  const result = await accountDeletionService.confirmEmployerDeletion(req.body.email, req.body.code);
   res.json({ success: true, data: result });
 }

@@ -10,6 +10,7 @@ import * as endorsementService from '../services/endorsementService.js';
 import * as verificationRequestService from '../services/verificationRequestService.js';
 import * as profileSuggestionsService from '../services/profileSuggestionsService.js';
 import * as smtpSettingsService from '../services/smtpSettingsService.js';
+import * as accountDeletionService from '../services/accountDeletionService.js';
 
 export async function getSmtpSettings(req, res) {
   const data = await smtpSettingsService.getEmployeeSmtpSettings(req.user);
@@ -253,5 +254,10 @@ export async function suggestCompanies(req, res) {
 
 export async function suggestRoles(req, res) {
   const data = await profileSuggestionsService.suggestRoles(req.query.q);
+  res.json({ success: true, data });
+}
+
+export async function deleteAccount(req, res) {
+  const data = await accountDeletionService.deleteOwnEmployeeAccount(req.user, req.body);
   res.json({ success: true, data });
 }

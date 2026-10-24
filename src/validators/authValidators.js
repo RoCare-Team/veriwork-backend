@@ -98,6 +98,13 @@ export const forgotPasswordSchema = z.object({
   email: z.string({ required_error: 'Email is required' }).email('Invalid email address'),
 });
 
+export const employerDeletionConfirmSchema = z.object({
+  email: z.string({ required_error: 'Email is required' }).email('Invalid email address'),
+  code: z
+    .string({ required_error: 'OTP is required' })
+    .regex(/^\d{6}$/, 'OTP must be 6 digits'),
+});
+
 export const resetPasswordSchema = z.object({
   token: z.string({ required_error: 'Reset token is required' }).min(1, 'Reset token is required'),
   newPassword: z.string({ required_error: 'Password is required' }).min(8, 'New password must be at least 8 characters'),

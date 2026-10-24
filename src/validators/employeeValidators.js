@@ -283,3 +283,7 @@ export const smtpSettingsSchema = z.object({
 export const smtpTestSchema = z.object({
   to: z.string().trim().email('Valid recipient email is required').max(200).optional(),
 });
+
+export const deleteAccountSchema = z.object({
+  confirm: z.string().trim().min(1, 'Type DELETE to confirm account deletion'),
+});

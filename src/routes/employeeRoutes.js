@@ -19,6 +19,7 @@ import {
   suggestionsQuerySchema,
   smtpSettingsSchema,
   smtpTestSchema,
+  deleteAccountSchema,
 } from '../validators/employeeValidators.js';
 import * as employeeController from '../controllers/employeeController.js';
 
@@ -151,5 +152,19 @@ router.patch(
 router.get('/settings/smtp', asyncHandler(employeeController.getSmtpSettings));
 router.put('/settings/smtp', validate(smtpSettingsSchema), asyncHandler(employeeController.updateSmtpSettings));
 router.post('/settings/smtp/test', validate(smtpTestSchema), asyncHandler(employeeController.testSmtpSettings));
+
+/**
+ * @swagger
+ * /employee/account:
+ *   delete:
+ *     tags: [Employee]
+ *     summary: Permanently delete the signed-in employee's account
+ *     description: >
+ *       In-app account deletion (Google Play requirement). Body must be
+ *       { "confirm": "DELETE" }. Erases the profile, documents, Aadhaar/selfie
+ *       images, DigiLocker link, job history, company links and all sessions.
+ *       Irreversible — the access and refresh tokens stop working immediately.
+ */
+router.delete('/account', validate(deleteAccountSchema), asyncHandler(employeeController.deleteAccount));
 
 export default router;

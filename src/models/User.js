@@ -67,6 +67,24 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    // Account-deletion OTP for enterprise users, emailed to their work email.
+    // Same idea as the reset token: only the sha256 hash is stored.
+    deletionOtpHash: {
+      type: String,
+      default: null,
+    },
+    deletionOtpExpires: {
+      type: Date,
+      default: null,
+    },
+    deletionOtpSentAt: {
+      type: Date,
+      default: null,
+    },
+    deletionOtpAttempts: {
+      type: Number,
+      default: 0,
+    },
   },
   { timestamps: true },
 );
